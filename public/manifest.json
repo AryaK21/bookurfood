@@ -1,0 +1,42 @@
+{
+  "name": "FoodBook - PG Meal Booking",
+  "short_name": "FoodBook",
+  "description": "Tactile, invite-only meal booking system for PG residents and canteen managers",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#121212",
+  "theme_color": "#121212",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/icons/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    }
+  ],
+  "categories": ["food", "lifestyle", "productivity"],
+  "shortcuts": [
+    {
+      "name": "Today's Menu",
+      "url": "/",
+      "description": "View today's menu and toggle meal attendance"
+    },
+    {
+      "name": "Admin Headcount",
+      "url": "/admin",
+      "description": "View live headcount and meal management"
+    }
+  ]
+}
