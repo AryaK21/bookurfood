@@ -562,8 +562,18 @@ export class DataStore {
   }
 
   // Headcount calculation helper
-  static getHeadcount(menuId: string, totalResidentsCount?: number) {
-    const bookings = this.getBookings().filter((b) => b.menu_id === menuId);
+  static getHeadcount(menuId: string, totalResidentsCount?: number, targetDate?: string, mealType?: MealType) {
+    const allMenus = this.getMenus();
+    const targetMenu = allMenus.find(
+      (m) =>
+        m.id === menuId ||
+        (targetDate && mealType && m.date === targetDate && m.meal_type === mealType)
+    );
+    const effectiveMenuId = targetMenu ? targetMenu.id : menuId;
+
+    const bookings = this.getBookings().filter(
+      (b) => b.menu_id === effectiveMenuId || b.menu_id === menuId
+    );
     const profiles = this.getProfiles().filter((p) => p.role === 'resident' && p.is_active);
     const total = totalResidentsCount ?? profiles.length;
 

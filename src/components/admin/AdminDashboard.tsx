@@ -30,6 +30,7 @@ import {
   Settings2,
   RotateCcw,
   Bell,
+  BellRing,
   Share2,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -107,6 +108,52 @@ export function AdminDashboard() {
 
   useEffect(() => {
     refreshAdminData();
+
+    // 1. Supabase Realtime Channel for instant live updates
+    let channel: any = null;
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = createClient();
+        channel = supabase
+          .channel('realtime:admin_dashboard')
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'bookings' },
+            () => {
+              refreshAdminData();
+            }
+          )
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'menus' },
+            () => {
+              refreshAdminData();
+            }
+          )
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'profiles' },
+            () => {
+              refreshAdminData();
+            }
+          )
+          .subscribe();
+      } catch (err) {
+        console.error('Realtime subscription error:', err);
+      }
+    }
+
+    // 2. Continuous 3-second live auto-poll fallback
+    const pollInterval = setInterval(() => {
+      refreshAdminData();
+    }, 3000);
+
+    return () => {
+      clearInterval(pollInterval);
+      if (channel) {
+        channel.unsubscribe();
+      }
+    };
   }, []);
 
   // Find active menu or placeholder for selected meal and day
@@ -138,10 +185,10 @@ export function AdminDashboard() {
     }
   }, [activeMenu?.id, selectedMealType, selectedDay]);
 
-  // Headcount calculation
+  // Headcount calculation (Live synchronized across date and slot)
   const activeResidents = profiles.filter((p) => p.role === 'resident' && p.is_active);
   const headcount = activeMenu
-    ? DataStore.getHeadcount(activeMenu.id, activeResidents.length)
+    ? DataStore.getHeadcount(activeMenu.id, activeResidents.length, targetDateStr, selectedMealType)
     : { eating: 0, skipping: 0, unbooked: 0, total: activeResidents.length, percentage: 0 };
 
   // Handle Save Menu (Simplified for food operator)
@@ -315,6 +362,46 @@ export function AdminDashboard() {
     }
   };
 
+  // Instant Test Notification Handler (Tests push pipeline without hitting rate limits)
+  const handleSendTestNotification = async () => {
+    setIsBroadcasting(true);
+    setBroadcastFeedback(null);
+    try {
+      const res = await fetch('/api/push', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          broadcast: true,
+          mealType: selectedMealType,
+          payload: {
+            title: `FoodBook Live Alert 🔔`,
+            body: `Test push notification delivered! Kitchen headcount is live.`,
+          },
+        }),
+      });
+      const data = await res.json();
+
+      // Also trigger local service worker test notification if active
+      if (typeof window !== 'undefined' && 'serviceWorker' in navigator && Notification.permission === 'granted') {
+        const reg = await navigator.serviceWorker.ready;
+        reg.showNotification('FoodBook Live Alert 🔔', {
+          body: 'Push notifications are working properly on this device!',
+          icon: '/icons/icon-192x192.png',
+          badge: '/icons/favicon.png',
+          vibrate: [150, 50, 150],
+          tag: 'foodbook-test-notif',
+        } as any);
+      }
+
+      setBroadcastFeedback(`✓ Test notification sent to ${data.sentCount || 1} registered device(s)!`);
+      setTimeout(() => setBroadcastFeedback(null), 4500);
+    } catch (err: any) {
+      setBroadcastFeedback('Test notification error: ' + err.message);
+    } finally {
+      setIsBroadcasting(false);
+    }
+  };
+
   // Share registration/menu link via WhatsApp for unwhitelisted or new residents
   const shareRegistrationLink = () => {
     const appUrl = typeof window !== 'undefined' ? window.location.origin : 'https://bookurfood.vercel.app';
@@ -430,12 +517,21 @@ export function AdminDashboard() {
       {/* ============================================================= */}
       {activeTab === 'headcount' && (
         <div className="space-y-3.5">
-          {/* CURRENT MEAL TITLE */}
+          {/* CURRENT MEAL TITLE + LIVE PULSE INDICATOR */}
           <div className="p-3.5 rounded-2xl bg-[#181818] border border-zinc-800 flex items-center justify-between gap-2">
             <div>
-              <p className="text-xs font-black text-amber-400 uppercase tracking-wide">
-                {selectedMealType} Menu
-              </p>
+              <div className="flex items-center gap-2">
+                <p className="text-xs font-black text-amber-400 uppercase tracking-wide">
+                  {selectedMealType} Menu
+                </p>
+                <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-950/80 border border-emerald-700/60 text-emerald-400 text-[10px] font-black">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                  </span>
+                  <span>LIVE</span>
+                </div>
+              </div>
               <p className="text-sm font-black text-white truncate max-w-[220px]">
                 {activeMenu.title}
               </p>
@@ -486,8 +582,9 @@ export function AdminDashboard() {
             </div>
           )}
 
-          {/* ACTION BUTTON 1: BROADCAST "FOOD IS READY" NOTIFICATION (RATE-LIMITED 1 PER MEAL) */}
+          {/* ACTION BUTTONS */}
           <div className="space-y-2 pt-1">
+            {/* BUTTON 1: BROADCAST "FOOD IS READY" NOTIFICATION */}
             <button
               type="button"
               disabled={isMealNotified || isBroadcasting}
@@ -511,17 +608,8 @@ export function AdminDashboard() {
               </span>
             </button>
 
-            {/* ACTION BUTTON 2: WHATSAPP HEADCOUNT & REGISTRATION SHARE */}
+            {/* BUTTON 2 & 3: WHATSAPP SHARE + INSTANT TEST NOTIFICATION */}
             <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={copyKitchenSummary}
-                className="py-3 px-3 rounded-2xl bg-[#181818] hover:bg-zinc-800 text-zinc-200 border border-zinc-700 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all"
-              >
-                <Copy className="w-3.5 h-3.5 text-green-400" />
-                <span>{copiedSummary ? '✓ Copied!' : 'Copy Count'}</span>
-              </button>
-
               <button
                 type="button"
                 onClick={shareRegistrationLink}
@@ -530,7 +618,27 @@ export function AdminDashboard() {
                 <Share2 className="w-3.5 h-3.5 text-green-400" />
                 <span>Share WhatsApp</span>
               </button>
+
+              <button
+                type="button"
+                onClick={handleSendTestNotification}
+                disabled={isBroadcasting}
+                className="py-3 px-3 rounded-2xl bg-[#181818] hover:bg-zinc-800 text-amber-300 border border-amber-500/40 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+              >
+                <BellRing className="w-3.5 h-3.5 text-amber-400" />
+                <span>Test My Device 🔔</span>
+              </button>
             </div>
+
+            {/* BUTTON 4: COPY SUMMARY */}
+            <button
+              type="button"
+              onClick={copyKitchenSummary}
+              className="w-full py-2.5 px-3 rounded-2xl bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 border border-zinc-800 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+            >
+              <Copy className="w-3.5 h-3.5 text-zinc-400" />
+              <span>{copiedSummary ? '✓ Copied Summary to Clipboard!' : 'Copy Headcount Summary'}</span>
+            </button>
           </div>
         </div>
       )}
