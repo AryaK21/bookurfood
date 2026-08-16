@@ -199,89 +199,42 @@ ALTER TABLE public.push_subscriptions ENABLE ROW LEVEL SECURITY;
 -- ------------------------------------------------------------------------------
 -- PROFILES POLICIES
 -- ------------------------------------------------------------------------------
--- 1. Admins have full access to view, add, modify, delete resident whitelist
-CREATE POLICY "Admins have full access to profiles"
+CREATE POLICY "Allow public all access on profiles"
   ON public.profiles
   FOR ALL
-  TO authenticated
-  USING (public.is_admin())
-  WITH CHECK (public.is_admin());
-
--- 2. Residents can read their own profile
-CREATE POLICY "Users can view own profile"
-  ON public.profiles
-  FOR SELECT
-  TO authenticated
-  USING (user_id = auth.uid());
+  TO public
+  USING (true)
+  WITH CHECK (true);
 
 -- ------------------------------------------------------------------------------
 -- MENUS POLICIES
 -- ------------------------------------------------------------------------------
--- 1. Admins have full CRUD access to menus
-CREATE POLICY "Admins have full access to menus"
+CREATE POLICY "Allow public all access on menus"
   ON public.menus
   FOR ALL
-  TO authenticated
-  USING (public.is_admin())
-  WITH CHECK (public.is_admin());
-
--- 2. Authenticated residents can view published menus
-CREATE POLICY "Residents can view published menus"
-  ON public.menus
-  FOR SELECT
-  TO authenticated
-  USING (is_published = true);
+  TO public
+  USING (true)
+  WITH CHECK (true);
 
 -- ------------------------------------------------------------------------------
 -- BOOKINGS POLICIES
 -- ------------------------------------------------------------------------------
--- 1. Admins can view and manage all bookings (Headcount dashboard)
-CREATE POLICY "Admins can view and manage all bookings"
+CREATE POLICY "Allow public all access on bookings"
   ON public.bookings
   FOR ALL
-  TO authenticated
-  USING (public.is_admin())
-  WITH CHECK (public.is_admin());
-
--- 2. Residents can view their own bookings
-CREATE POLICY "Residents can view own bookings"
-  ON public.bookings
-  FOR SELECT
-  TO authenticated
-  USING (profile_id = public.get_my_profile_id());
-
--- 3. Residents can insert their own booking
-CREATE POLICY "Residents can insert own booking"
-  ON public.bookings
-  FOR INSERT
-  TO authenticated
-  WITH CHECK (profile_id = public.get_my_profile_id());
-
--- 4. Residents can update their own booking
-CREATE POLICY "Residents can update own booking"
-  ON public.bookings
-  FOR UPDATE
-  TO authenticated
-  USING (profile_id = public.get_my_profile_id())
-  WITH CHECK (profile_id = public.get_my_profile_id());
+  TO public
+  USING (true)
+  WITH CHECK (true);
 
 -- ------------------------------------------------------------------------------
 -- PUSH SUBSCRIPTIONS POLICIES
 -- ------------------------------------------------------------------------------
--- 1. Users can register and manage their own push subscriptions
-CREATE POLICY "Users manage own push subscriptions"
+CREATE POLICY "Allow public all access on push_subscriptions"
   ON public.push_subscriptions
   FOR ALL
-  TO authenticated
-  USING (profile_id = public.get_my_profile_id())
-  WITH CHECK (profile_id = public.get_my_profile_id());
-
--- 2. Admins can read push subscriptions to send notifications
-CREATE POLICY "Admins read push subscriptions"
-  ON public.push_subscriptions
-  FOR SELECT
-  TO authenticated
-  USING (public.is_admin());
+  TO public
+  USING (true)
+  WITH CHECK (true);
 
 -- ==============================================================================
 -- REAL-TIME SUBSCRIPTION CONFIGURATION

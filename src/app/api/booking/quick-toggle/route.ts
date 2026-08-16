@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/client';
+import { createClient } from '@supabase/supabase-js';
 import { DataStore, isSupabaseConfigured } from '@/lib/data/data-store';
 import type { BookingStatus } from '@/types/database.types';
 
@@ -20,35 +20,85 @@ export async function POST(request: Request) {
       );
     }
 
-    // In Supabase mode
-    if (isSupabaseConfigured() && menuId && profileId) {
-      try {
-        const supabase = createClient();
-        const payload: any = {
-          menu_id: menuId,
-          profile_id: profileId,
-          status,
-          updated_at: new Date().toISOString(),
-        };
-        const { data, error } = await supabase
-          .from('bookings')
-          .upsert(payload, { onConflict: 'menu_id,profile_id' })
-          .select()
-          .single();
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseKey =
+      process.env.SUPABASE_SERVICE_ROLE_KEY ||
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+      '';
 
-        if (error) throw error;
-        return NextResponse.json({
-          success: true,
-          status,
-          booking: data,
-          message: status === 'eating' ? "You're booked to eat! 🍽️" : "Marked skipping 🛑",
+    if (supabaseUrl && supabaseKey && !supabaseUrl.includes('sample-pg-canteen') && profileId) {
+      try {
+        const supabase = createClient(supabaseUrl, supabaseKey, {
+          auth: { persistSession: false },
         });
+
+        let targetMenuId = menuId;
+
+        // Auto-resolve placeholder menu IDs (e.g. unconfigured-2026-08-16-dinner)
+        if (!targetMenuId || targetMenuId.startsWith('unconfigured-')) {
+          const parts = (targetMenuId || '').split('-');
+          const mealType = parts.pop() || 'dinner';
+          const date = parts.length > 1 ? parts.slice(1).join('-') : new Date().toISOString().split('T')[0];
+
+          const schedules: Record<string, { cutoffH: number; cutoffM: number; start: string; end: string }> = {
+            breakfast: { cutoffH: 7, cutoffM: 0, start: '08:00', end: '10:30' },
+            lunch: { cutoffH: 11, cutoffM: 30, start: '12:30', end: '15:00' },
+            dinner: { cutoffH: 18, cutoffM: 30, start: '19:30', end: '21:30' },
+          };
+          const schedule = schedules[mealType] || schedules.dinner;
+          const [y, m, d] = date.split('-').map(Number);
+          const cutoffDate = new Date(y, (m || 1) - 1, d || 1, schedule.cutoffH, schedule.cutoffM, 0);
+
+          const { data: menuRow } = await supabase
+            .from('menus')
+            .upsert(
+              {
+                date,
+                meal_type: mealType,
+                title: 'Daily Meal (Menu updating)',
+                items: [],
+                cutoff_time: cutoffDate.toISOString(),
+                serving_start: schedule.start,
+                serving_end: schedule.end,
+                is_published: false,
+              },
+              { onConflict: 'date,meal_type' }
+            )
+            .select()
+            .single();
+
+          if (menuRow) {
+            targetMenuId = menuRow.id;
+          }
+        }
+
+        if (targetMenuId) {
+          const payload: any = {
+            menu_id: targetMenuId,
+            profile_id: profileId,
+            status,
+            updated_at: new Date().toISOString(),
+          };
+          const { data, error } = await supabase
+            .from('bookings')
+            .upsert(payload, { onConflict: 'menu_id,profile_id' })
+            .select()
+            .single();
+
+          if (error) throw error;
+          return NextResponse.json({
+            success: true,
+            status,
+            booking: data,
+            message: status === 'eating' ? "You're booked to eat! 🍽️" : "Marked skipping 🛑",
+          });
+        }
       } catch (err: any) {
         console.error('Supabase quick booking error:', err);
       }
     }
 
-    // Fallback or preview DataStore
+    // Fallback DataStore
     const result = await DataStore.quickToggleBooking({
       menuId,
       profileId,

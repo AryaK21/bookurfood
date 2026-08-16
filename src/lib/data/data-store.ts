@@ -186,24 +186,38 @@ export class DataStore {
   }): Promise<Profile> {
     const cleanPhone = newProfile.phone_number.replace(/\s+/g, '');
 
-    if (isSupabaseConfigured()) {
-      const supabase = createClient();
-      const insertPayload: any = {
-        phone_number: cleanPhone,
-        name: newProfile.name,
-        room_number: newProfile.room_number || null,
-        role: newProfile.role || 'resident',
-        is_active: newProfile.is_active ?? true,
-      };
+    // Server-side Admin API execution
+    if (typeof window !== 'undefined') {
+      try {
+        const res = await fetch('/api/admin/data', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'addProfile',
+            payload: {
+              ...newProfile,
+              phone_number: cleanPhone,
+            },
+          }),
+        });
 
-      const { data, error } = await supabase
-        .from('profiles')
-        .insert(insertPayload)
-        .select()
-        .single();
-
-      if (error) throw error;
-      return data as unknown as Profile;
+        const result = await res.json();
+        if (result.success && result.profile) {
+          const profiles = this.getProfiles();
+          const filtered = profiles.filter((p) => p.phone_number !== cleanPhone);
+          const updated = [result.profile, ...filtered];
+          this.saveProfiles(updated);
+          return result.profile;
+        } else if (!result.success && result.error) {
+          throw new Error(result.error);
+        }
+      } catch (apiErr: any) {
+        if (!isSupabaseConfigured()) {
+          console.warn('Falling back to local storage:', apiErr.message);
+        } else {
+          throw apiErr;
+        }
+      }
     }
 
     const profiles = this.getProfiles();
@@ -231,11 +245,23 @@ export class DataStore {
   }
 
   static async removeProfile(id: string): Promise<void> {
-    if (isSupabaseConfigured()) {
-      const supabase = createClient();
-      const { error } = await supabase.from('profiles').delete().eq('id', id);
-      if (error) throw error;
-      return;
+    if (typeof window !== 'undefined') {
+      try {
+        const res = await fetch('/api/admin/data', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'removeProfile',
+            payload: { id },
+          }),
+        });
+        const result = await res.json();
+        if (!result.success && result.error) {
+          throw new Error(result.error);
+        }
+      } catch (apiErr: any) {
+        if (isSupabaseConfigured()) throw apiErr;
+      }
     }
 
     const profiles = this.getProfiles().filter((p) => p.id !== id);
@@ -305,28 +331,35 @@ export class DataStore {
     const isPlaceholderId = menuData.id?.startsWith('unconfigured-');
     const effectiveId = isPlaceholderId ? crypto.randomUUID() : (menuData.id || crypto.randomUUID());
 
-    if (isSupabaseConfigured()) {
-      const supabase = createClient();
-      const upsertPayload: any = {
-        id: effectiveId,
-        date: menuData.date,
-        meal_type: menuData.meal_type,
-        title: menuData.title,
-        items: menuData.items,
-        cutoff_time: menuData.cutoff_time,
-        serving_start: menuData.serving_start || null,
-        serving_end: menuData.serving_end || null,
-        is_published: menuData.is_published ?? true,
-        notes: menuData.notes ?? null,
-      };
+    if (typeof window !== 'undefined') {
+      try {
+        const res = await fetch('/api/admin/data', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'saveMenu',
+            payload: {
+              ...menuData,
+              id: effectiveId,
+            },
+          }),
+        });
 
-      const { data, error } = await supabase
-        .from('menus')
-        .upsert(upsertPayload)
-        .select()
-        .single();
-      if (error) throw error;
-      return data as unknown as Menu;
+        const result = await res.json();
+        if (result.success && result.menu) {
+          const menus = this.getMenus();
+          const filtered = menus.filter(
+            (m) => !(m.date === menuData.date && m.meal_type === menuData.meal_type)
+          );
+          const updated = [result.menu, ...filtered];
+          this.saveMenus(updated);
+          return result.menu;
+        } else if (!result.success && result.error) {
+          throw new Error(result.error);
+        }
+      } catch (apiErr: any) {
+        if (isSupabaseConfigured()) throw apiErr;
+      }
     }
 
     const menus = this.getMenus();
@@ -376,15 +409,23 @@ export class DataStore {
   }
 
   static async deleteMenu(date: string, mealType: MealType): Promise<void> {
-    if (isSupabaseConfigured()) {
-      const supabase = createClient();
-      const { error } = await supabase
-        .from('menus')
-        .delete()
-        .eq('date', date)
-        .eq('meal_type', mealType);
-      if (error) throw error;
-      return;
+    if (typeof window !== 'undefined') {
+      try {
+        const res = await fetch('/api/admin/data', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'deleteMenu',
+            payload: { date, meal_type: mealType },
+          }),
+        });
+        const result = await res.json();
+        if (!result.success && result.error) {
+          throw new Error(result.error);
+        }
+      } catch (apiErr: any) {
+        if (isSupabaseConfigured()) throw apiErr;
+      }
     }
 
     const menus = this.getMenus().filter(
@@ -412,22 +453,39 @@ export class DataStore {
   }
 
   static async toggleBooking(menuId: string, profileId: string, status: BookingStatus): Promise<Booking> {
-    if (isSupabaseConfigured()) {
-      const supabase = createClient();
-      const bookingPayload: any = {
-        menu_id: menuId,
-        profile_id: profileId,
-        status,
-        updated_at: new Date().toISOString(),
-      };
-
-      const { data, error } = await supabase
-        .from('bookings')
-        .upsert(bookingPayload, { onConflict: 'menu_id,profile_id' })
-        .select()
-        .single();
-      if (error) throw error;
-      return data as unknown as Booking;
+    if (typeof window !== 'undefined') {
+      try {
+        const res = await fetch('/api/admin/data', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'toggleBooking',
+            payload: { menu_id: menuId, profile_id: profileId, status },
+          }),
+        });
+        const result = await res.json();
+        if (result.success && result.booking) {
+          const bookings = this.getBookings();
+          const targetId = result.menuId || menuId;
+          const filtered = bookings.filter(
+            (b) =>
+              !(
+                (b.menu_id === menuId || b.menu_id === targetId) &&
+                b.profile_id === profileId
+              )
+          );
+          const updated = [result.booking, ...filtered];
+          this.saveBookings(updated);
+          return result.booking;
+        } else if (!result.success && result.error) {
+          throw new Error(result.error);
+        }
+      } catch (apiErr: any) {
+        if (isSupabaseConfigured()) {
+          console.error('Booking API error:', apiErr.message);
+          throw apiErr;
+        }
+      }
     }
 
     const bookings = this.getBookings();
