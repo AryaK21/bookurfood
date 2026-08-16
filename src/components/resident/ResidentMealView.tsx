@@ -108,13 +108,20 @@ export function ResidentMealView() {
   const currentStatus: BookingStatus | 'unbooked' = activeBooking
     ? activeBooking.status
     : 'unbooked';
+  const currentOption = activeBooking?.selected_option || (currentStatus === 'eating' ? 'Veg' : null);
 
   // Check if cutoff has passed for active meal
   const cutoffTime = activeMenu ? new Date(activeMenu.cutoff_time).getTime() : 0;
   const isCutoffPassed = Date.now() > cutoffTime;
 
-  // Handle booking toggle
-  const handleSelectStatus = async (status: BookingStatus) => {
+  // Meal options available for this meal (e.g. ["Veg Thali", "Non-Veg Thali"])
+  const mealChoices =
+    activeMenu?.meal_options && activeMenu.meal_options.length > 1
+      ? activeMenu.meal_options
+      : null;
+
+  // Handle booking toggle with option choice
+  const handleSelectStatus = async (status: BookingStatus, option?: string) => {
     if (!user || !activeMenu || isCutoffPassed || isLoading) return;
 
     setIsLoading(true);
@@ -122,7 +129,7 @@ export function ResidentMealView() {
       if (status === 'eating') {
         triggerMealConfetti();
       }
-      await DataStore.toggleBooking(activeMenu.id, user.id, status);
+      await DataStore.toggleBooking(activeMenu.id, user.id, status, option);
       await refreshData();
     } catch (err: any) {
       console.error('Failed to update booking:', err);
@@ -246,9 +253,16 @@ export function ResidentMealView() {
         >
           {/* MEAL TITLE & CUTOFF */}
           <div className="flex items-center justify-between gap-2 border-b border-zinc-800/80 pb-3">
-            <h3 className="text-base sm:text-lg font-black text-white leading-tight">
-              {activeMenu?.title || 'Menu not added yet'}
-            </h3>
+            <div>
+              <h3 className="text-base sm:text-lg font-black text-white leading-tight">
+                {activeMenu?.title || 'Menu not added yet'}
+              </h3>
+              {currentStatus === 'eating' && (
+                <span className="text-[11px] font-black text-green-400 flex items-center gap-1 mt-0.5">
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Booked: {currentOption || 'Eating'}
+                </span>
+              )}
+            </div>
 
             <span className="inline-flex items-center gap-1 text-[11px] font-black uppercase px-2.5 py-1 rounded-full bg-zinc-900 text-zinc-400 border border-zinc-700 flex-shrink-0">
               <Clock className="w-3 h-3 text-amber-400" />
@@ -290,12 +304,68 @@ export function ResidentMealView() {
           </div>
 
           {/* 3D TACTILE CONFIRMATION BUTTONS */}
-          <div className="pt-1">
+          <div className="pt-1 space-y-2">
             {isCutoffPassed ? (
               <div className="py-2.5 px-4 rounded-2xl bg-zinc-900 border border-zinc-800 text-center text-xs font-bold text-zinc-500">
                 🔒 Booking deadline passed for this meal
               </div>
+            ) : mealChoices && mealChoices.length > 1 ? (
+              /* MULTI-CHOICE BUTTONS (e.g. Veg Thali vs Non-Veg Thali + Skip) */
+              <div className="space-y-2">
+                <p className="text-[11px] font-black text-zinc-400 uppercase tracking-wider text-center">
+                  Select Your Meal Choice
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  {mealChoices.map((choice) => {
+                    const isSelected = currentStatus === 'eating' && currentOption === choice;
+                    const isNonVeg = choice.toLowerCase().includes('non') || choice.toLowerCase().includes('chicken') || choice.toLowerCase().includes('egg') || choice.toLowerCase().includes('meat');
+
+                    return (
+                      <button
+                        key={choice}
+                        type="button"
+                        onClick={() => handleSelectStatus('eating', choice)}
+                        disabled={isLoading}
+                        className={`
+                          py-3 px-3 rounded-2xl font-black text-xs flex flex-col items-center justify-center gap-1 transition-all cursor-pointer
+                          ${
+                            isSelected
+                              ? isNonVeg
+                                ? 'bg-orange-500 text-black border-2 border-orange-400 border-b-4 border-b-orange-700 shadow-md scale-[1.02]'
+                                : 'bg-green-500 text-black border-2 border-green-400 border-b-4 border-b-green-700 shadow-md scale-[1.02]'
+                              : isNonVeg
+                              ? 'bg-[#271b16] hover:bg-orange-950 text-orange-300 border border-orange-500/40 border-b-4 border-b-zinc-900 active:border-b-0'
+                              : 'bg-[#18261b] hover:bg-green-950 text-green-300 border border-green-500/40 border-b-4 border-b-zinc-900 active:border-b-0'
+                          }
+                        `}
+                      >
+                        <span className="text-base">{isNonVeg ? '🍗' : '🥗'}</span>
+                        <span className="truncate max-w-[130px]">{choice}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* SKIP BUTTON FOR MULTI-CHOICE MEALS */}
+                <button
+                  type="button"
+                  onClick={() => handleSelectStatus('skipping')}
+                  disabled={isLoading}
+                  className={`
+                    w-full py-2.5 px-4 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer
+                    ${
+                      currentStatus === 'skipping'
+                        ? 'bg-red-500 text-white border border-red-400 shadow-sm'
+                        : 'bg-zinc-900 hover:bg-zinc-800 text-zinc-400 border border-zinc-800'
+                    }
+                  `}
+                >
+                  <X className="w-3.5 h-3.5 text-red-400" />
+                  <span>{currentStatus === 'skipping' ? 'Skipping this meal' : 'Skip this meal'}</span>
+                </button>
+              </div>
             ) : (
+              /* STANDARD 2-BUTTON EAT / SKIP */
               <div className="grid grid-cols-2 gap-2.5">
                 {/* RED SKIP BUTTON */}
                 <button
@@ -319,7 +389,7 @@ export function ResidentMealView() {
                 {/* GREEN EAT BUTTON */}
                 <button
                   type="button"
-                  onClick={() => handleSelectStatus('eating')}
+                  onClick={() => handleSelectStatus('eating', 'Veg')}
                   disabled={isLoading}
                   className={`
                     py-3 sm:py-3.5 px-4 rounded-2xl font-black text-xs sm:text-sm flex items-center justify-center gap-1.5

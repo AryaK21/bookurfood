@@ -55,6 +55,9 @@ export function AdminDashboard() {
   const [menuItemsText, setMenuItemsText] = useState('');
   const [menuCutoffHour, setMenuCutoffHour] = useState('11:30');
   const [menuNotes, setMenuNotes] = useState('');
+  const [hasMealChoices, setHasMealChoices] = useState(false);
+  const [mealOption1, setMealOption1] = useState('Veg Thali');
+  const [mealOption2, setMealOption2] = useState('Non-Veg Thali');
   const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
   const [menuFeedback, setMenuFeedback] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
@@ -176,6 +179,16 @@ export function AdminDashboard() {
       const itemsList = (activeMenu.items as MenuItem[]).map((i) => i.name).join(', ');
       setMenuItemsText(itemsList);
 
+      if (activeMenu.meal_options && activeMenu.meal_options.length > 1) {
+        setHasMealChoices(true);
+        setMealOption1(activeMenu.meal_options[0] || 'Veg Thali');
+        setMealOption2(activeMenu.meal_options[1] || 'Non-Veg Thali');
+      } else {
+        setHasMealChoices(false);
+        setMealOption1('Veg Thali');
+        setMealOption2('Non-Veg Thali');
+      }
+
       const cutoff = new Date(activeMenu.cutoff_time);
       const hh = String(cutoff.getHours()).padStart(2, '0');
       const mm = String(cutoff.getMinutes()).padStart(2, '0');
@@ -189,7 +202,16 @@ export function AdminDashboard() {
   const activeResidents = profiles.filter((p) => p.role === 'resident' && p.is_active);
   const headcount = activeMenu
     ? DataStore.getHeadcount(activeMenu.id, activeResidents.length, targetDateStr, selectedMealType)
-    : { eating: 0, skipping: 0, unbooked: 0, total: activeResidents.length, percentage: 0 };
+    : {
+        eating: 0,
+        skipping: 0,
+        unbooked: 0,
+        total: activeResidents.length,
+        percentage: 0,
+        optionsCount: {},
+        vegCount: 0,
+        nonVegCount: 0,
+      };
 
   // Handle Save Menu (Simplified for food operator)
   const handleSaveMenu = async (e: React.FormEvent) => {
@@ -221,6 +243,10 @@ export function AdminDashboard() {
 
     const schedule = MEAL_SCHEDULES[selectedMealType];
 
+    const meal_options = hasMealChoices
+      ? [mealOption1.trim() || 'Veg Thali', mealOption2.trim() || 'Non-Veg Thali']
+      : null;
+
     try {
       await DataStore.saveMenu({
         id: activeMenu.id,
@@ -228,6 +254,7 @@ export function AdminDashboard() {
         meal_type: selectedMealType,
         title: titleToSave,
         items: itemsArray,
+        meal_options,
         cutoff_time: cutoffDate.toISOString(),
         serving_start: schedule.servingStart,
         serving_end: schedule.servingEnd,
@@ -306,7 +333,6 @@ export function AdminDashboard() {
     if (confirm(`Remove ${name} from resident list?`)) {
       try {
         await DataStore.removeProfile(id);
-        refreshAdminData();
       } catch (err: any) {
         alert(err.message || 'Failed to remove resident');
       }
@@ -315,7 +341,17 @@ export function AdminDashboard() {
 
   // WhatsApp Kitchen Copy
   const copyKitchenSummary = () => {
-    const text = `📋 *PG KITCHEN HEADCOUNT REPORT*\n*Meal:* ${selectedMealType.toUpperCase()} (${activeMenu?.title || 'Daily Meal'})\n*Date:* ${targetDateStr}\n\n🍽️ *TOTAL PLATES TO COOK:* ${headcount.eating} / ${headcount.total}\n🛑 *SKIPPING:* ${headcount.skipping}\n⏳ *PENDING:* ${headcount.unbooked}\n\n*Generated via FoodBook*`;
+    let text = `📋 *PG KITCHEN HEADCOUNT REPORT*\n*Meal:* ${selectedMealType.toUpperCase()} (${activeMenu?.title || 'Daily Meal'})\n*Date:* ${targetDateStr}\n\n`;
+    text += `🍽️ *TOTAL PLATES TO COOK:* ${headcount.eating} / ${headcount.total}\n`;
+
+    if (headcount.eating > 0 && headcount.optionsCount && Object.keys(headcount.optionsCount).length > 0) {
+      Object.entries(headcount.optionsCount).forEach(([opt, count]) => {
+        text += `   • ${opt}: ${count} plate${count !== 1 ? 's' : ''}\n`;
+      });
+    }
+
+    text += `🛑 *SKIPPING:* ${headcount.skipping}\n`;
+    text += `⏳ *PENDING:* ${headcount.unbooked}\n\n*Generated via FoodBook*`;
 
     navigator.clipboard.writeText(text);
     setCopiedSummary(true);
@@ -362,44 +398,11 @@ export function AdminDashboard() {
     }
   };
 
-  // Instant Test Notification Handler (Tests push pipeline without hitting rate limits)
-  const handleSendTestNotification = async () => {
-    setIsBroadcasting(true);
-    setBroadcastFeedback(null);
-    try {
-      const res = await fetch('/api/push', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          broadcast: true,
-          mealType: selectedMealType,
-          payload: {
-            title: `FoodBook Live Alert 🔔`,
-            body: `Test push notification delivered! Kitchen headcount is live.`,
-          },
-        }),
-      });
-      const data = await res.json();
-
-      // Also trigger local service worker test notification if active
-      if (typeof window !== 'undefined' && 'serviceWorker' in navigator && Notification.permission === 'granted') {
-        const reg = await navigator.serviceWorker.ready;
-        reg.showNotification('FoodBook Live Alert 🔔', {
-          body: 'Push notifications are working properly on this device!',
-          icon: '/icons/icon-192x192.png',
-          badge: '/icons/favicon.png',
-          vibrate: [150, 50, 150],
-          tag: 'foodbook-test-notif',
-        } as any);
-      }
-
-      setBroadcastFeedback(`✓ Test notification sent to ${data.sentCount || 1} registered device(s)!`);
-      setTimeout(() => setBroadcastFeedback(null), 4500);
-    } catch (err: any) {
-      setBroadcastFeedback('Test notification error: ' + err.message);
-    } finally {
-      setIsBroadcasting(false);
-    }
+  // Reset notification rate limit helper (for testing or emergency updates)
+  const handleResetNotificationLimit = () => {
+    DataStore.clearMealNotified(targetDateStr, selectedMealType);
+    setBroadcastFeedback('✓ Notification limit reset for this meal. You can now send an alert.');
+    setTimeout(() => setBroadcastFeedback(null), 3500);
   };
 
   // Share registration/menu link via WhatsApp for unwhitelisted or new residents
@@ -574,6 +577,26 @@ export function AdminDashboard() {
             </div>
           </div>
 
+          {/* MULTIPLE CHOICES BREAKDOWN PILL */}
+          {headcount.eating > 0 && headcount.optionsCount && Object.keys(headcount.optionsCount).length > 0 && (
+            <div className="p-3 rounded-2xl bg-[#141414] border border-zinc-800 flex items-center justify-around gap-2 shadow-inner">
+              {Object.entries(headcount.optionsCount).map(([optionName, count]) => {
+                const isNonVeg = optionName.toLowerCase().includes('non') || optionName.toLowerCase().includes('chicken') || optionName.toLowerCase().includes('egg') || optionName.toLowerCase().includes('meat');
+                return (
+                  <div key={optionName} className="flex items-center gap-2">
+                    <span className="text-xl">{isNonVeg ? '🍗' : '🥗'}</span>
+                    <div>
+                      <p className="text-[10px] uppercase font-bold text-zinc-400 leading-none">{optionName}</p>
+                      <p className={`text-base font-black leading-tight ${isNonVeg ? 'text-orange-400' : 'text-green-400'}`}>
+                        {count} plate{count !== 1 ? 's' : ''}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
           {/* BROADCAST ALERT FEEDBACK */}
           {broadcastFeedback && (
             <div className="p-3 rounded-2xl bg-amber-950/70 border border-amber-800 text-xs text-amber-300 font-bold flex items-center gap-2">
@@ -585,30 +608,44 @@ export function AdminDashboard() {
           {/* ACTION BUTTONS */}
           <div className="space-y-2 pt-1">
             {/* BUTTON 1: BROADCAST "FOOD IS READY" NOTIFICATION */}
-            <button
-              type="button"
-              disabled={isMealNotified || isBroadcasting}
-              onClick={handleSendFoodReadyAlert}
-              className={`
-                w-full py-3.5 px-4 rounded-2xl font-black text-xs sm:text-sm flex items-center justify-center gap-2 transition-all shadow-md
-                ${
-                  isMealNotified
-                    ? 'bg-zinc-900 border-2 border-zinc-800 text-zinc-500 cursor-not-allowed'
-                    : 'bg-amber-500 hover:bg-amber-400 text-black border-b-4 border-b-amber-700 active:border-b-0 active:translate-y-1 cursor-pointer'
-                }
-              `}
-            >
-              <Bell className="w-4 h-4" />
-              <span>
-                {isMealNotified
-                  ? `✓ Alert Sent for ${selectedMealType.toUpperCase()} (1 per meal limit)`
-                  : isBroadcasting
-                  ? 'Sending Alerts to Residents...'
-                  : `🔔 Alert Residents: ${selectedMealType.toUpperCase()} is Ready`}
-              </span>
-            </button>
+            <div className="space-y-1">
+              <button
+                type="button"
+                disabled={isMealNotified || isBroadcasting}
+                onClick={handleSendFoodReadyAlert}
+                className={`
+                  w-full py-3.5 px-4 rounded-2xl font-black text-xs sm:text-sm flex items-center justify-center gap-2 transition-all shadow-md
+                  ${
+                    isMealNotified
+                      ? 'bg-zinc-900 border-2 border-zinc-800 text-zinc-500 cursor-not-allowed'
+                      : 'bg-amber-500 hover:bg-amber-400 text-black border-b-4 border-b-amber-700 active:border-b-0 active:translate-y-1 cursor-pointer'
+                  }
+                `}
+              >
+                <Bell className="w-4 h-4" />
+                <span>
+                  {isMealNotified
+                    ? `✓ Alert Sent for ${selectedMealType.toUpperCase()} (1 per meal limit)`
+                    : isBroadcasting
+                    ? 'Sending Alerts to Residents...'
+                    : `🔔 Alert Residents: ${selectedMealType.toUpperCase()} is Ready`}
+                </span>
+              </button>
 
-            {/* BUTTON 2 & 3: WHATSAPP SHARE + INSTANT TEST NOTIFICATION */}
+              {isMealNotified && (
+                <div className="flex justify-end pr-1">
+                  <button
+                    type="button"
+                    onClick={handleResetNotificationLimit}
+                    className="text-[11px] text-zinc-500 hover:text-amber-400 underline font-bold cursor-pointer transition-colors"
+                  >
+                    Reset limit & allow resending
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* BUTTON 2 & 3: WHATSAPP SHARE + COPY SUMMARY */}
             <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
@@ -621,24 +658,13 @@ export function AdminDashboard() {
 
               <button
                 type="button"
-                onClick={handleSendTestNotification}
-                disabled={isBroadcasting}
-                className="py-3 px-3 rounded-2xl bg-[#181818] hover:bg-zinc-800 text-amber-300 border border-amber-500/40 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+                onClick={copyKitchenSummary}
+                className="py-3 px-3 rounded-2xl bg-[#181818] hover:bg-zinc-800 text-zinc-300 border border-zinc-700 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all"
               >
-                <BellRing className="w-3.5 h-3.5 text-amber-400" />
-                <span>Test My Device 🔔</span>
+                <Copy className="w-3.5 h-3.5 text-zinc-400" />
+                <span>{copiedSummary ? '✓ Copied!' : 'Copy Summary'}</span>
               </button>
             </div>
-
-            {/* BUTTON 4: COPY SUMMARY */}
-            <button
-              type="button"
-              onClick={copyKitchenSummary}
-              className="w-full py-2.5 px-3 rounded-2xl bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 border border-zinc-800 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all"
-            >
-              <Copy className="w-3.5 h-3.5 text-zinc-400" />
-              <span>{copiedSummary ? '✓ Copied Summary to Clipboard!' : 'Copy Headcount Summary'}</span>
-            </button>
           </div>
         </div>
       )}
@@ -650,10 +676,14 @@ export function AdminDashboard() {
         <div className="p-4 sm:p-5 rounded-3xl bg-[#181818] border-2 border-zinc-700/80 border-b-6 border-b-zinc-900 space-y-4 shadow-xl">
           {/* HEADER & EDIT/NEW STATUS */}
           <div className="flex items-center justify-between border-b border-zinc-800/80 pb-2.5">
-            <h2 className="text-base sm:text-lg font-black text-white capitalize flex items-center gap-2">
-              <ChefHat className="w-5 h-5 text-amber-400" />
-              {hasExistingCustomMenu ? `Edit ${selectedMealType}` : `Set ${selectedMealType}`} ({selectedDay})
-            </h2>
+            <div>
+              <span className="text-xs font-black uppercase text-amber-400 tracking-wider">
+                {selectedMealType} Menu Form
+              </span>
+              <p className="text-xs text-zinc-400">
+                {hasExistingCustomMenu ? '✏️ Editing today\'s menu' : '✨ Adding new meal for ' + selectedDay}
+              </p>
+            </div>
 
             {/* CORNER MORE OPTIONS LINK */}
             <button
@@ -681,7 +711,7 @@ export function AdminDashboard() {
             </div>
           )}
 
-          {/* 1-TAP QUICK MEAL CHIPS (POHA, UPMA, VADA PAV / VEG THALI, NON-VEG THALI) */}
+          {/* 1-TAP QUICK MEAL CHIPS */}
           <div className="space-y-1.5">
             <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">
               💡 1-Tap Quick Meals (Tap to fill):
@@ -717,24 +747,40 @@ export function AdminDashboard() {
                 <>
                   <button
                     type="button"
-                    onClick={() => applyQuickMeal('Veg Thali', '')}
-                    className="px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-green-500/50 text-[11px] font-bold text-green-300 cursor-pointer flex items-center gap-1"
+                    onClick={() => {
+                      applyQuickMeal('Special PG Thali Feast', 'Veg Thali, Non-Veg Chicken Thali');
+                      setHasMealChoices(true);
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-amber-500/50 text-[11px] font-bold text-amber-300 cursor-pointer flex items-center gap-1"
                   >
-                    <span>🟢</span> Veg Thali
+                    <span>🍱</span> Veg + Non-Veg Feast
                   </button>
                   <button
                     type="button"
-                    onClick={() => applyQuickMeal('Non-Veg Thali', '')}
+                    onClick={() => {
+                      applyQuickMeal('Veg Thali', 'Paneer Butter Masala, Dal Tadka, Roti, Rice');
+                      setHasMealChoices(false);
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-green-500/50 text-[11px] font-bold text-green-300 cursor-pointer flex items-center gap-1"
+                  >
+                    <span>🟢</span> Veg Thali Only
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      applyQuickMeal('Non-Veg Thali', 'Chicken Masala Curry, Roti, Rice, Salad');
+                      setHasMealChoices(false);
+                    }}
                     className="px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-red-500/50 text-[11px] font-bold text-red-300 cursor-pointer flex items-center gap-1"
                   >
-                    <span>🔴</span> Non-Veg Thali
+                    <span>🔴</span> Non-Veg Only
                   </button>
                 </>
               )}
             </div>
           </div>
 
-          {/* MAIN 2-FIELD FOOD FORM */}
+          {/* MAIN FOOD FORM */}
           <form onSubmit={handleSaveMenu} className="space-y-3.5">
             {/* 1. MEAL NAME */}
             <div className="space-y-1">
@@ -745,13 +791,65 @@ export function AdminDashboard() {
                 type="text"
                 value={menuTitle}
                 onChange={(e) => setMenuTitle(e.target.value)}
-                placeholder="e.g. Veg Thali / Poha"
+                placeholder="e.g. Sunday Special Feast / Veg Thali"
                 required
                 className="w-full px-4 py-3 rounded-2xl bg-[#141414] border border-zinc-700 text-white font-bold text-sm focus:outline-none focus:border-amber-500"
               />
             </div>
 
-            {/* 2. DISHES DESCRIPTION (OPTIONAL) */}
+            {/* 2. MULTIPLE MEAL CHOICES (e.g. Veg vs Non-Veg Voting) */}
+            <div className="p-3.5 rounded-2xl bg-[#141414] border border-zinc-800 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <label className="text-xs font-black text-white flex items-center gap-1.5">
+                    <span>🍱 Meal Choices</span>
+                    <span className="text-[10px] text-amber-400 font-bold">(e.g. Veg vs Non-Veg)</span>
+                  </label>
+                  <p className="text-[11px] text-zinc-400 leading-tight">Allow residents to vote for specific meal choices</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setHasMealChoices(!hasMealChoices)}
+                  className={`px-3 py-1 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                    hasMealChoices ? 'bg-amber-500 text-black shadow-sm' : 'bg-zinc-800 text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  {hasMealChoices ? 'Choices Enabled ✓' : '+ Enable Choices'}
+                </button>
+              </div>
+
+              {hasMealChoices && (
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black uppercase tracking-wider text-green-400 flex items-center gap-1">
+                      <span>🥗</span> Choice 1 (Veg)
+                    </label>
+                    <input
+                      type="text"
+                      value={mealOption1}
+                      onChange={(e) => setMealOption1(e.target.value)}
+                      placeholder="e.g. Veg Thali"
+                      className="w-full px-3 py-2 rounded-xl bg-zinc-900 border border-zinc-700 text-white font-bold text-xs focus:outline-none focus:border-green-500"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black uppercase tracking-wider text-orange-400 flex items-center gap-1">
+                      <span>🍗</span> Choice 2 (Non-Veg)
+                    </label>
+                    <input
+                      type="text"
+                      value={mealOption2}
+                      onChange={(e) => setMealOption2(e.target.value)}
+                      placeholder="e.g. Non-Veg Chicken Thali"
+                      className="w-full px-3 py-2 rounded-xl bg-zinc-900 border border-zinc-700 text-white font-bold text-xs focus:outline-none focus:border-orange-500"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 3. DISHES DESCRIPTION (OPTIONAL) */}
             <div className="space-y-1">
               <label className="block text-xs font-black uppercase tracking-wider text-zinc-300">
                 Dishes in this Meal <span className="text-zinc-500 normal-case">(Optional)</span>
@@ -760,7 +858,7 @@ export function AdminDashboard() {
                 value={menuItemsText}
                 onChange={(e) => setMenuItemsText(e.target.value)}
                 rows={2}
-                placeholder="Optional: e.g. Paneer Butter Masala, Roti, Rice"
+                placeholder="Optional: e.g. Paneer Butter Masala, Chicken Curry, Roti, Rice"
                 className="w-full px-4 py-3 rounded-2xl bg-[#141414] border border-zinc-700 text-white font-medium text-sm focus:outline-none focus:border-amber-500 leading-relaxed"
               />
             </div>
@@ -787,7 +885,7 @@ export function AdminDashboard() {
                         type="time"
                         value={menuCutoffHour}
                         onChange={(e) => setMenuCutoffHour(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl bg-[#141414] border border-zinc-700 text-white font-bold text-xs"
+                        className="w-full mt-1 px-3 py-2 rounded-xl bg-[#121212] border border-zinc-700 text-white font-bold text-xs focus:outline-none"
                       />
                     </div>
 
@@ -800,7 +898,7 @@ export function AdminDashboard() {
                         value={menuNotes}
                         onChange={(e) => setMenuNotes(e.target.value)}
                         placeholder="Served hot from kitchen"
-                        className="w-full px-3 py-2 rounded-xl bg-[#141414] border border-zinc-700 text-white font-medium text-xs"
+                        className="w-full mt-1 px-3 py-2 rounded-xl bg-[#121212] border border-zinc-700 text-white font-medium text-xs focus:outline-none"
                       />
                     </div>
                   </div>

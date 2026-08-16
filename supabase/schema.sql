@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS public.menus (
   meal_type TEXT NOT NULL CHECK (meal_type IN ('breakfast', 'lunch', 'dinner')),
   title TEXT NOT NULL,
   items JSONB NOT NULL DEFAULT '[]'::JSONB,
+  meal_options JSONB DEFAULT NULL,
   cutoff_time TIMESTAMPTZ NOT NULL,
   serving_start TEXT,
   serving_end TEXT,
@@ -45,6 +46,7 @@ CREATE TABLE IF NOT EXISTS public.bookings (
   menu_id UUID NOT NULL REFERENCES public.menus(id) ON DELETE CASCADE,
   profile_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
   status TEXT NOT NULL CHECK (status IN ('eating', 'skipping')),
+  selected_option TEXT DEFAULT 'Veg',
   notes TEXT,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -53,6 +55,10 @@ CREATE TABLE IF NOT EXISTS public.bookings (
 
 CREATE INDEX IF NOT EXISTS idx_bookings_menu_id ON public.bookings(menu_id);
 CREATE INDEX IF NOT EXISTS idx_bookings_profile_id ON public.bookings(profile_id);
+
+-- Migration helpers if database already exists:
+ALTER TABLE public.menus ADD COLUMN IF NOT EXISTS meal_options JSONB DEFAULT NULL;
+ALTER TABLE public.bookings ADD COLUMN IF NOT EXISTS selected_option TEXT DEFAULT 'Veg';
 
 -- 4. PUSH SUBSCRIPTIONS TABLE (Web Push API)
 CREATE TABLE IF NOT EXISTS public.push_subscriptions (

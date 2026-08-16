@@ -6,11 +6,12 @@ import type { BookingStatus } from '@/types/database.types';
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { menuId, profileId, phone, status } = body as {
+    const { menuId, profileId, phone, status, selectedOption } = body as {
       menuId?: string;
       profileId?: string;
       phone?: string;
       status?: BookingStatus;
+      selectedOption?: string | null;
     };
 
     if (!status || (status !== 'eating' && status !== 'skipping')) {
@@ -79,18 +80,33 @@ export async function POST(request: Request) {
             status,
             updated_at: new Date().toISOString(),
           };
-          const { data, error } = await supabase
+          if (selectedOption || status === 'eating') {
+            payload.selected_option = selectedOption || 'Veg';
+          }
+
+          let { data, error } = await supabase
             .from('bookings')
             .upsert(payload, { onConflict: 'menu_id,profile_id' })
             .select()
             .single();
+
+          if (error && error.message.includes('selected_option')) {
+            delete payload.selected_option;
+            const retry = await supabase
+              .from('bookings')
+              .upsert(payload, { onConflict: 'menu_id,profile_id' })
+              .select()
+              .single();
+            data = retry.data;
+            error = retry.error;
+          }
 
           if (error) throw error;
           return NextResponse.json({
             success: true,
             status,
             booking: data,
-            message: status === 'eating' ? "You're booked to eat! 🍽️" : "Marked skipping 🛑",
+            message: status === 'eating' ? `You're booked to eat (${payload.selected_option || 'Meal'})! 🍽️` : "Marked skipping 🛑",
           });
         }
       } catch (err: any) {

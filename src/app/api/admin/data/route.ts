@@ -56,7 +56,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: true });
     }
 
-    // 3. SAVE MENU
+    // 3. SAVE MENU (Supports meal_options like Veg / Non-Veg choices)
     if (action === 'saveMenu') {
       const isPlaceholder = payload.id?.startsWith('unconfigured-');
       const insertData: any = {
@@ -71,15 +71,31 @@ export async function POST(request: Request) {
         is_published: payload.is_published ?? true,
       };
 
+      if (payload.meal_options && Array.isArray(payload.meal_options)) {
+        insertData.meal_options = payload.meal_options;
+      }
+
       if (!isPlaceholder && payload.id) {
         insertData.id = payload.id;
       }
 
-      const { data, error } = await supabase
+      let { data, error } = await supabase
         .from('menus')
         .upsert(insertData, { onConflict: 'date,meal_type' })
         .select()
         .single();
+
+      // Graceful fallback if meal_options column is not yet migrated in DB
+      if (error && error.message.includes('meal_options')) {
+        delete insertData.meal_options;
+        const retry = await supabase
+          .from('menus')
+          .upsert(insertData, { onConflict: 'date,meal_type' })
+          .select()
+          .single();
+        data = retry.data;
+        error = retry.error;
+      }
 
       if (error) {
         console.error('API saveMenu error:', error);
@@ -103,14 +119,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: true });
     }
 
-    // 5. TOGGLE BOOKING (Handles placeholder menu IDs automatically)
+    // 5. TOGGLE BOOKING (Supports selected_option like Veg / Non-Veg)
     if (action === 'toggleBooking') {
       let targetMenuId = payload.menu_id;
 
       // If booking a placeholder slot (e.g. unconfigured-2026-08-16-dinner)
       if (targetMenuId && typeof targetMenuId === 'string' && targetMenuId.startsWith('unconfigured-')) {
         const parts = targetMenuId.split('-');
-        // Format: unconfigured-YYYY-MM-DD-mealType
         const mealType = parts.pop() || 'lunch';
         const date = parts.slice(1).join('-');
 
@@ -124,7 +139,6 @@ export async function POST(request: Request) {
         const [y, m, d] = date.split('-').map(Number);
         const cutoffDate = new Date(y, (m || 1) - 1, d || 1, schedule.cutoffH, schedule.cutoffM, 0);
 
-        // Auto-create or find existing menu slot row in database
         const { data: menuRow, error: menuErr } = await supabase
           .from('menus')
           .upsert(
@@ -154,19 +168,37 @@ export async function POST(request: Request) {
         targetMenuId = menuRow.id;
       }
 
-      const { data, error } = await supabase
+      const bookingPayload: any = {
+        menu_id: targetMenuId,
+        profile_id: payload.profile_id,
+        status: payload.status,
+        updated_at: new Date().toISOString(),
+      };
+
+      if (payload.selected_option) {
+        bookingPayload.selected_option = payload.selected_option;
+      }
+
+      let { data, error } = await supabase
         .from('bookings')
-        .upsert(
-          {
-            menu_id: targetMenuId,
-            profile_id: payload.profile_id,
-            status: payload.status,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: 'menu_id,profile_id' }
-        )
+        .upsert(bookingPayload, { onConflict: 'menu_id,profile_id' })
         .select()
         .single();
+
+      // Graceful fallback if selected_option column is not yet migrated in DB
+      if (error && error.message.includes('selected_option')) {
+        delete bookingPayload.selected_option;
+        if (payload.selected_option) {
+          bookingPayload.notes = `Option: ${payload.selected_option}`;
+        }
+        const retry = await supabase
+          .from('bookings')
+          .upsert(bookingPayload, { onConflict: 'menu_id,profile_id' })
+          .select()
+          .single();
+        data = retry.data;
+        error = retry.error;
+      }
 
       if (error) {
         console.error('API toggleBooking error:', error);

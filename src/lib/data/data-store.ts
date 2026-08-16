@@ -322,6 +322,7 @@ export class DataStore {
     meal_type: MealType;
     title: string;
     items: MenuItem[];
+    meal_options?: string[] | null;
     cutoff_time: string;
     serving_start?: string;
     serving_end?: string;
@@ -371,6 +372,7 @@ export class DataStore {
         ...menus[index],
         title: menuData.title,
         items: menuData.items,
+        meal_options: menuData.meal_options ?? menus[index].meal_options ?? null,
         cutoff_time: menuData.cutoff_time,
         serving_start: menuData.serving_start ?? menus[index].serving_start,
         serving_end: menuData.serving_end ?? menus[index].serving_end,
@@ -385,6 +387,7 @@ export class DataStore {
         meal_type: menuData.meal_type,
         title: menuData.title,
         items: menuData.items,
+        meal_options: menuData.meal_options || null,
         cutoff_time: menuData.cutoff_time,
         serving_start: menuData.serving_start || '08:00',
         serving_end: menuData.serving_end || '10:30',
@@ -452,7 +455,12 @@ export class DataStore {
     localStorage.setItem(STORAGE_KEYS.BOOKINGS, JSON.stringify(bookings));
   }
 
-  static async toggleBooking(menuId: string, profileId: string, status: BookingStatus): Promise<Booking> {
+  static async toggleBooking(
+    menuId: string,
+    profileId: string,
+    status: BookingStatus,
+    selectedOption?: string | null
+  ): Promise<Booking> {
     if (typeof window !== 'undefined') {
       try {
         const res = await fetch('/api/admin/data', {
@@ -460,7 +468,12 @@ export class DataStore {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             action: 'toggleBooking',
-            payload: { menu_id: menuId, profile_id: profileId, status },
+            payload: {
+              menu_id: menuId,
+              profile_id: profileId,
+              status,
+              selected_option: selectedOption || (status === 'eating' ? 'Veg' : null),
+            },
           }),
         });
         const result = await res.json();
@@ -496,6 +509,7 @@ export class DataStore {
       resultBooking = {
         ...bookings[existingIndex],
         status,
+        selected_option: selectedOption ?? bookings[existingIndex].selected_option ?? (status === 'eating' ? 'Veg' : null),
         updated_at: new Date().toISOString(),
       };
       bookings[existingIndex] = resultBooking;
@@ -505,6 +519,7 @@ export class DataStore {
         menu_id: menuId,
         profile_id: profileId,
         status,
+        selected_option: selectedOption ?? (status === 'eating' ? 'Veg' : null),
         notes: null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -522,11 +537,13 @@ export class DataStore {
     profileId,
     phone,
     status,
+    selectedOption,
   }: {
     menuId?: string;
     profileId?: string;
     phone?: string;
     status: BookingStatus;
+    selectedOption?: string | null;
   }): Promise<{ success: boolean; booking?: Booking; menu?: Menu; profile?: Profile; error?: string }> {
     const menus = this.getMenus();
     let targetMenu = menuId ? menus.find((m) => m.id === menuId) : undefined;
@@ -549,7 +566,6 @@ export class DataStore {
       targetProfile = profiles.find((p) => p.phone_number === cleanPhone || p.phone_number.slice(-10) === cleanPhone.slice(-10));
     }
     if (!targetProfile) {
-      // Default to first active resident if testing offline
       targetProfile = profiles.find((p) => p.role === 'resident' && p.is_active);
     }
 
@@ -557,11 +573,11 @@ export class DataStore {
       return { success: false, error: 'Resident profile not identified.' };
     }
 
-    const booking = await this.toggleBooking(targetMenu.id, targetProfile.id, status);
+    const booking = await this.toggleBooking(targetMenu.id, targetProfile.id, status, selectedOption);
     return { success: true, booking, menu: targetMenu, profile: targetProfile };
   }
 
-  // Headcount calculation helper
+  // Headcount calculation helper (with Veg / Non-Veg / Option Breakdown)
   static getHeadcount(menuId: string, totalResidentsCount?: number, targetDate?: string, mealType?: MealType) {
     const allMenus = this.getMenus();
     const targetMenu = allMenus.find(
@@ -577,9 +593,27 @@ export class DataStore {
     const profiles = this.getProfiles().filter((p) => p.role === 'resident' && p.is_active);
     const total = totalResidentsCount ?? profiles.length;
 
-    const eatingCount = bookings.filter((b) => b.status === 'eating').length;
+    const eatingBookings = bookings.filter((b) => b.status === 'eating');
+    const eatingCount = eatingBookings.length;
     const skippingCount = bookings.filter((b) => b.status === 'skipping').length;
     const unbookedCount = Math.max(0, total - (eatingCount + skippingCount));
+
+    // Dynamic Options Breakdown (e.g. Veg vs Non-Veg)
+    const optionsCount: Record<string, number> = {};
+    let vegCount = 0;
+    let nonVegCount = 0;
+
+    eatingBookings.forEach((b) => {
+      const opt = b.selected_option || 'Veg';
+      optionsCount[opt] = (optionsCount[opt] || 0) + 1;
+
+      const isNonVeg = opt.toLowerCase().includes('non') || opt.toLowerCase().includes('chicken') || opt.toLowerCase().includes('egg') || opt.toLowerCase().includes('meat');
+      if (isNonVeg) {
+        nonVegCount++;
+      } else {
+        vegCount++;
+      }
+    });
 
     return {
       eating: eatingCount,
@@ -587,6 +621,9 @@ export class DataStore {
       unbooked: unbookedCount,
       total,
       percentage: total > 0 ? Math.round((eatingCount / total) * 100) : 0,
+      optionsCount,
+      vegCount,
+      nonVegCount,
       bookings,
     };
   }
@@ -613,6 +650,21 @@ export class DataStore {
       );
     } catch (e) {
       console.error('Failed to save notification rate limit state:', e);
+    }
+  }
+
+  static clearMealNotified(date?: string, mealType?: MealType): void {
+    if (typeof window === 'undefined') return;
+    try {
+      if (date && mealType) {
+        localStorage.removeItem(`foodbook_notif_sent_${date}_${mealType}`);
+      } else {
+        Object.keys(localStorage)
+          .filter((k) => k.startsWith('foodbook_notif_sent_') || k.startsWith('foodbook_autonotif_'))
+          .forEach((k) => localStorage.removeItem(k));
+      }
+    } catch (e) {
+      console.error('Failed to clear notification rate limit state:', e);
     }
   }
 }

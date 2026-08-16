@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/lib/auth/auth-context';
 import { registerPushNotifications } from '@/lib/push/push-client';
-import { Bell, BellRing, CheckCircle2, X, Sparkles, Send } from 'lucide-react';
+import { Bell, BellRing, CheckCircle2, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export function NotificationPermissionBanner() {
@@ -12,7 +12,6 @@ export function NotificationPermissionBanner() {
   const [loading, setLoading] = useState(false);
   const [dismissed, setDismissed] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
-  const [testing, setTesting] = useState(false);
 
   useEffect(() => {
     if (typeof window !== 'undefined' && 'Notification' in window) {
@@ -33,38 +32,12 @@ export function NotificationPermissionBanner() {
 
     if (res.success) {
       setPermission('granted');
-      setSuccessMsg('✓ Food alerts enabled! You will receive meal ready notifications.');
+      setSuccessMsg('✓ Food alerts enabled! You will receive meal notifications.');
       setTimeout(() => {
         setSuccessMsg('');
-      }, 5000);
+      }, 4000);
     } else {
       setPermission(res.permission);
-    }
-  };
-
-  const handleSendTestNotification = async () => {
-    setTesting(true);
-    try {
-      if (typeof window !== 'undefined' && 'serviceWorker' in navigator && Notification.permission === 'granted') {
-        const reg = await navigator.serviceWorker.ready;
-        reg.showNotification('FoodBook Alert 🔔', {
-          body: 'Kitchen notifications are active on this device!',
-          icon: '/icons/icon-192x192.png',
-          badge: '/icons/favicon.png',
-          vibrate: [150, 50, 150],
-          tag: 'foodbook-test-user-alert',
-          actions: [
-            { action: 'eating', title: "✅ Yes (I'll Eat)" },
-            { action: 'skipping', title: '❌ No (Skip)' },
-          ],
-        } as any);
-      }
-      setSuccessMsg('✓ Test alert sent to your device!');
-      setTimeout(() => setSuccessMsg(''), 4000);
-    } catch (err: any) {
-      console.error('Test alert error:', err);
-    } finally {
-      setTesting(false);
     }
   };
 
@@ -73,31 +46,9 @@ export function NotificationPermissionBanner() {
     sessionStorage.setItem('foodbook_notif_banner_dismissed', 'true');
   };
 
-  if (dismissed || permission === 'denied') {
+  // If already granted (and no temporary success toast) or dismissed or denied, do not display banner
+  if ((permission === 'granted' && !successMsg) || dismissed || permission === 'denied') {
     return null;
-  }
-
-  // If already granted, show a compact test badge
-  if (permission === 'granted') {
-    return (
-      <div className="w-full flex items-center justify-between px-3 py-1.5 rounded-2xl bg-[#181818] border border-zinc-800 text-[11px] text-zinc-400">
-        <div className="flex items-center gap-1.5">
-          <span className="relative flex h-2 w-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
-          </span>
-          <span className="text-zinc-300 font-bold">Food Alerts Active 🔔</span>
-        </div>
-        <button
-          type="button"
-          onClick={handleSendTestNotification}
-          disabled={testing}
-          className="px-2.5 py-0.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-amber-300 font-black cursor-pointer transition-all active:scale-95 text-[10px]"
-        >
-          {testing ? 'Sending...' : 'Test Alert 🔔'}
-        </button>
-      </div>
-    );
   }
 
   return (

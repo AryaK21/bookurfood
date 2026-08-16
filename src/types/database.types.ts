@@ -34,6 +34,7 @@ export interface Menu {
   meal_type: MealType;
   title: string;
   items: MenuItem[];
+  meal_options?: string[] | null; // e.g. ["Veg Thali", "Non-Veg Thali"]
   cutoff_time: string; // ISO timestamptz
   serving_start?: string; // e.g. "08:00"
   serving_end?: string; // e.g. "10:30"
@@ -47,6 +48,7 @@ export interface Booking {
   menu_id: string;
   profile_id: string;
   status: BookingStatus;
+  selected_option?: string | null; // e.g. "Veg" | "Non-Veg" | custom option name
   notes: string | null;
   updated_at: string;
   created_at: string;
