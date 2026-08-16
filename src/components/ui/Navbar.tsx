@@ -97,54 +97,15 @@ export function Navbar() {
                         </span>
                       </div>
 
-                      {/* Demo Quick Switcher Header */}
-                      <div className="px-3 pt-2.5 pb-1 flex items-center gap-1.5 text-[11px] font-bold text-zinc-400">
-                        <Sparkles className="w-3 h-3 text-amber-400" />
-                        <span>Quick Persona Switch:</span>
-                      </div>
-
-                      <div className="space-y-1">
-                        <button
-                          onClick={() => {
-                            loginAsDemoUser('resident', '+919876543211');
-                            setShowSwitchMenu(false);
-                          }}
-                          className="w-full text-left px-3 py-1.5 rounded-xl text-xs font-medium text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center justify-between"
-                        >
-                          <span>Aarav (Room 204)</span>
-                          <span className="text-[10px] text-green-400">Resident</span>
-                        </button>
-                        <button
-                          onClick={() => {
-                            loginAsDemoUser('resident', '+919876543212');
-                            setShowSwitchMenu(false);
-                          }}
-                          className="w-full text-left px-3 py-1.5 rounded-xl text-xs font-medium text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center justify-between"
-                        >
-                          <span>Rohan (Room 108)</span>
-                          <span className="text-[10px] text-green-400">Resident</span>
-                        </button>
-                        <button
-                          onClick={() => {
-                            loginAsDemoUser('admin', '+919876543210');
-                            setShowSwitchMenu(false);
-                          }}
-                          className="w-full text-left px-3 py-1.5 rounded-xl text-xs font-medium text-zinc-300 hover:bg-zinc-800 hover:text-white flex items-center justify-between"
-                        >
-                          <span>Manager Rao</span>
-                          <span className="text-[10px] text-amber-400">Admin</span>
-                        </button>
-                      </div>
-
-                      <div className="mt-2 pt-1 border-t border-zinc-800">
+                      <div className="p-1">
                         <button
                           onClick={() => {
                             logout();
                             setShowSwitchMenu(false);
                           }}
-                          className="w-full text-left px-3 py-2 rounded-xl text-xs font-bold text-red-400 hover:bg-red-500/10 flex items-center gap-2 transition-colors"
+                          className="w-full text-left px-3 py-2.5 rounded-xl text-xs font-bold text-red-400 hover:bg-red-500/10 flex items-center gap-2 transition-colors cursor-pointer"
                         >
-                          <LogOut className="w-3.5 h-3.5" />
+                          <LogOut className="w-4 h-4" />
                           <span>Sign Out</span>
                         </button>
                       </div>

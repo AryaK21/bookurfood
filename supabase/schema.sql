@@ -25,10 +25,12 @@ CREATE INDEX IF NOT EXISTS idx_profiles_user_id ON public.profiles(user_id);
 CREATE TABLE IF NOT EXISTS public.menus (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   date DATE NOT NULL,
-  meal_type TEXT NOT NULL CHECK (meal_type IN ('lunch', 'dinner')),
+  meal_type TEXT NOT NULL CHECK (meal_type IN ('breakfast', 'lunch', 'dinner')),
   title TEXT NOT NULL,
   items JSONB NOT NULL DEFAULT '[]'::JSONB,
   cutoff_time TIMESTAMPTZ NOT NULL,
+  serving_start TEXT,
+  serving_end TEXT,
   is_published BOOLEAN NOT NULL DEFAULT true,
   notes TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -289,70 +291,13 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.bookings;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.profiles;
 
 -- ==============================================================================
--- SEED DATA (For Immediate Demonstration & Testing)
+-- INITIAL SETUP (Primary Admin Profile)
 -- ==============================================================================
 
--- 1. Admin Profile
+-- 1. Initial Admin Profile (Manager)
 INSERT INTO public.profiles (id, phone_number, name, room_number, role, is_active)
 VALUES 
-  ('00000000-0000-0000-0000-000000000001', '+919876543210', 'Manager Rao (Admin)', 'Office', 'admin', true)
+  ('00000000-0000-0000-0000-000000000001', '+919876543210', 'Admin Manager', 'Office', 'admin', true)
 ON CONFLICT (phone_number) DO UPDATE 
 SET name = EXCLUDED.name, role = EXCLUDED.role;
 
--- 2. Pre-Authorized Residents (Whitelist)
-INSERT INTO public.profiles (id, phone_number, name, room_number, role, is_active)
-VALUES 
-  ('00000000-0000-0000-0000-000000000002', '+919876543211', 'Aarav Sharma', '204-A', 'resident', true),
-  ('00000000-0000-0000-0000-000000000003', '+919876543212', 'Rohan Verma', '108-B', 'resident', true),
-  ('00000000-0000-0000-0000-000000000004', '+919876543213', 'Ananya Iyer', '312-A', 'resident', true),
-  ('00000000-0000-0000-0000-000000000005', '+919876543214', 'Vikram Patel', '105-C', 'resident', true),
-  ('00000000-0000-0000-0000-000000000006', '+919876543215', 'Priya Nair', '210-B', 'resident', true),
-  ('00000000-0000-0000-0000-000000000007', '+919876543216', 'Kavya Reddy', '304-A', 'resident', true)
-ON CONFLICT (phone_number) DO NOTHING;
-
--- 3. Today's Lunch & Dinner Menus
-INSERT INTO public.menus (id, date, meal_type, title, items, cutoff_time, is_published, notes)
-VALUES 
-  (
-    '11111111-1111-1111-1111-111111111111',
-    CURRENT_DATE,
-    'lunch',
-    'North Indian Thali Feast',
-    '[
-      {"name": "Paneer Butter Masala", "category": "curry", "is_veg": true},
-      {"name": "Dal Tadka", "category": "curry", "is_veg": true},
-      {"name": "Butter Phulka (3 pcs)", "category": "bread", "is_veg": true},
-      {"name": "Jeera Rice", "category": "rice", "is_veg": true},
-      {"name": "Boondi Raita & Salad", "category": "side", "is_veg": true},
-      {"name": "Gulab Jamun (2 pcs)", "category": "dessert", "is_veg": true}
-    ]'::JSONB,
-    (CURRENT_DATE + TIME '11:30:00')::TIMESTAMPTZ,
-    true,
-    'Hot lunch served fresh between 12:30 PM - 2:30 PM'
-  ),
-  (
-    '22222222-2222-2222-2222-222222222222',
-    CURRENT_DATE,
-    'dinner',
-    'Special Dum Biryani Night',
-    '[
-      {"name": "Hyderabadi Chicken Biryani / Paneer Biryani", "category": "main", "is_veg": false},
-      {"name": "Mirchi Ka Salan", "category": "curry", "is_veg": true},
-      {"name": "Cucumber Onion Raita", "category": "side", "is_veg": true},
-      {"name": "Double Ka Meetha", "category": "dessert", "is_veg": true}
-    ]'::JSONB,
-    (CURRENT_DATE + TIME '17:00:00')::TIMESTAMPTZ,
-    true,
-    'Dinner served hot from 8:00 PM - 10:00 PM. Cutoff strictly at 5:00 PM.'
-  )
-ON CONFLICT (date, meal_type) DO UPDATE
-SET title = EXCLUDED.title, items = EXCLUDED.items, cutoff_time = EXCLUDED.cutoff_time;
-
--- 4. Sample Bookings for Today's Dinner
-INSERT INTO public.bookings (menu_id, profile_id, status)
-VALUES
-  ('22222222-2222-2222-2222-222222222222', '00000000-0000-0000-0000-000000000002', 'eating'),
-  ('22222222-2222-2222-2222-222222222222', '00000000-0000-0000-0000-000000000003', 'eating'),
-  ('22222222-2222-2222-2222-222222222222', '00000000-0000-0000-0000-000000000004', 'skipping'),
-  ('22222222-2222-2222-2222-222222222222', '00000000-0000-0000-0000-000000000005', 'eating')
-ON CONFLICT (menu_id, profile_id) DO NOTHING;

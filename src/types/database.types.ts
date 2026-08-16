@@ -7,7 +7,7 @@ export type Json =
   | Json[];
 
 export type UserRole = 'resident' | 'admin';
-export type MealType = 'lunch' | 'dinner';
+export type MealType = 'breakfast' | 'lunch' | 'dinner';
 export type BookingStatus = 'eating' | 'skipping';
 
 export interface Profile {
@@ -24,7 +24,7 @@ export interface Profile {
 export interface MenuItem {
   id: string;
   name: string;
-  category: 'main' | 'curry' | 'bread' | 'rice' | 'dessert' | 'side';
+  category: 'main' | 'curry' | 'bread' | 'rice' | 'dessert' | 'side' | 'beverage';
   is_veg?: boolean;
 }
 
@@ -35,6 +35,8 @@ export interface Menu {
   title: string;
   items: MenuItem[];
   cutoff_time: string; // ISO timestamptz
+  serving_start?: string; // e.g. "08:00"
+  serving_end?: string; // e.g. "10:30"
   is_published: boolean;
   notes: string | null;
   created_at: string;

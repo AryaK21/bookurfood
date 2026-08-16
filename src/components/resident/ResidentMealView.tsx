@@ -2,40 +2,33 @@
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/lib/auth/auth-context';
-import { DataStore } from '@/lib/data/data-store';
-import type { Menu, Booking, BookingStatus, MenuItem } from '@/types/database.types';
-import { TactileButton } from '@/components/ui/TactileButton';
-import { TactileCard } from '@/components/ui/TactileCard';
-import { Badge } from '@/components/ui/Badge';
+import { DataStore, MEAL_SCHEDULES } from '@/lib/data/data-store';
+import type { Menu, Booking, BookingStatus, MenuItem, MealType } from '@/types/database.types';
 import { triggerMealConfetti } from '@/components/ui/Confetti';
-import { 
-  UtensilsCrossed, 
-  Check, 
-  X, 
-  Clock, 
-  AlertTriangle, 
-  Sparkles, 
-  Flame, 
-  Sun, 
-  Moon, 
-  CheckCircle2, 
+import {
+  Check,
+  X,
+  Clock,
+  Coffee,
+  Sun,
+  Moon,
+  Lock,
+  Flame,
+  CheckCircle2,
   XCircle,
-  HelpCircle,
-  Bell,
-  RefreshCw
+  UtensilsCrossed,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export function ResidentMealView() {
   const { user } = useAuth();
+  const [selectedDay, setSelectedDay] = useState<'today' | 'tomorrow'>('today');
+  const [selectedMealType, setSelectedMealType] = useState<MealType>('lunch');
   const [menus, setMenus] = useState<Menu[]>([]);
-  const [selectedMealType, setSelectedMealType] = useState<'lunch' | 'dinner'>('dinner');
   const [bookings, setBookings] = useState<Booking[]>([]);
-  const [isToggling, setIsToggling] = useState(false);
-  const [timeRemainingText, setTimeRemainingText] = useState<string>('');
-  const [isCutoffPassed, setIsCutoffPassed] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
-  // Load active menus and user booking status
+  // Load menus & bookings
   const refreshData = () => {
     const loadedMenus = DataStore.getMenus();
     setMenus(loadedMenus);
@@ -47,285 +40,277 @@ export function ResidentMealView() {
     refreshData();
   }, [user]);
 
-  // Select current active menu based on mealType
-  const currentMenu = menus.find((m) => m.meal_type === selectedMealType) || menus[0];
-
-  // Get current user's booking for this menu
-  const userBooking = user && currentMenu
-    ? bookings.find((b) => b.menu_id === currentMenu.id && b.profile_id === user.id)
-    : undefined;
-
-  const currentStatus: BookingStatus | 'unbooked' = userBooking ? userBooking.status : 'unbooked';
-
-  // Calculate cutoff time countdown
+  // Listen to Service Worker background updates
   useEffect(() => {
-    if (!currentMenu) return;
+    if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
 
-    const checkCutoff = () => {
-      const cutoff = new Date(currentMenu.cutoff_time).getTime();
-      const now = new Date().getTime();
-      const diff = cutoff - now;
-
-      if (diff <= 0) {
-        setIsCutoffPassed(true);
-        const cutoffDate = new Date(currentMenu.cutoff_time);
-        const formattedTime = cutoffDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        setTimeRemainingText(`Cutoff passed (${formattedTime})`);
-      } else {
-        setIsCutoffPassed(false);
-        const hours = Math.floor(diff / (1000 * 60 * 60));
-        const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-        if (hours > 0) {
-          setTimeRemainingText(`Closes in ${hours}h ${minutes}m`);
-        } else {
-          setTimeRemainingText(`Closes in ${minutes} mins!`);
-        }
+    const handleSwMessage = (event: MessageEvent) => {
+      if (event.data && event.data.type === 'FOODBOOK_BOOKING_UPDATED') {
+        refreshData();
       }
     };
 
-    checkCutoff();
-    const interval = setInterval(checkCutoff, 30000);
-    return () => clearInterval(interval);
-  }, [currentMenu]);
+    navigator.serviceWorker.addEventListener('message', handleSwMessage);
+    return () => {
+      navigator.serviceWorker.removeEventListener('message', handleSwMessage);
+    };
+  }, []);
 
-  // Handle Attendance Toggle
-  const handleToggle = async (status: BookingStatus) => {
-    if (!user || !currentMenu || isCutoffPassed || isToggling) return;
+  const todayStr = new Date().toISOString().split('T')[0];
+  const tomorrowDate = new Date();
+  tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+  const tomorrowStr = tomorrowDate.toISOString().split('T')[0];
 
-    setIsToggling(true);
+  const targetDateStr = selectedDay === 'today' ? todayStr : tomorrowStr;
+  const mealsForSelectedDay = DataStore.getMealsForDate(targetDateStr);
+
+  // Current active menu based on selectedMealType
+  const activeMenu =
+    mealsForSelectedDay.find((m) => m.meal_type === selectedMealType) ||
+    mealsForSelectedDay[0];
+
+  const activeSchedule = MEAL_SCHEDULES[selectedMealType] || MEAL_SCHEDULES.dinner;
+
+  // Active menu booking status for logged-in user
+  const activeBooking =
+    user && activeMenu
+      ? bookings.find(
+          (b) => b.menu_id === activeMenu.id && b.profile_id === user.id
+        )
+      : undefined;
+  const currentStatus: BookingStatus | 'unbooked' = activeBooking
+    ? activeBooking.status
+    : 'unbooked';
+
+  // Check if cutoff has passed for active meal
+  const cutoffTime = activeMenu ? new Date(activeMenu.cutoff_time).getTime() : 0;
+  const isCutoffPassed = Date.now() > cutoffTime;
+
+  // Handle booking toggle
+  const handleSelectStatus = async (status: BookingStatus) => {
+    if (!user || !activeMenu || isCutoffPassed || isLoading) return;
+
+    setIsLoading(true);
     try {
-      await DataStore.toggleBooking(currentMenu.id, user.id, status);
-      refreshData();
-
       if (status === 'eating') {
         triggerMealConfetti();
       }
+      await DataStore.toggleBooking(activeMenu.id, user.id, status);
+      refreshData();
     } catch (err: any) {
-      alert(err.message || 'Failed to update meal booking');
+      alert(err.message || 'Failed to update booking');
     } finally {
-      setIsToggling(false);
+      setIsLoading(false);
     }
   };
 
-  return (
-    <div className="w-full max-w-xl mx-auto space-y-6 pb-12">
-      {/* MEAL SWITCHER (LUNCH vs DINNER PILLS) */}
-      <div className="flex items-center justify-center">
-        <div className="p-1.5 rounded-full bg-[#181818] border border-zinc-800/90 flex items-center gap-1.5 shadow-inner">
-          <button
-            onClick={() => setSelectedMealType('lunch')}
-            className={`
-              flex items-center gap-2 px-5 py-2.5 rounded-full text-xs font-black transition-all select-none
-              ${selectedMealType === 'lunch'
-                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-[0_2px_12px_rgba(245,158,11,0.25)]'
-                : 'text-zinc-400 hover:text-zinc-200'
-              }
-            `}
-          >
-            <Sun className="w-3.5 h-3.5" />
-            <span>Today&apos;s Lunch</span>
-          </button>
+  const isMenuPending =
+    !activeMenu ||
+    activeMenu.title === 'Menu not added yet' ||
+    (activeMenu.items as MenuItem[]).length === 0;
 
+  return (
+    <div className="w-full max-w-md mx-auto space-y-3.5">
+      {/* 1. TOP BAR: HEADER + TODAY / TOMORROW TOGGLE */}
+      <div className="flex items-center justify-between px-1">
+        <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+          Book Food
+        </h2>
+
+        {/* DAY TOGGLE (TODAY vs TOMORROW) */}
+        <div className="p-1 rounded-2xl bg-[#181818] border border-zinc-800 flex items-center gap-1 shadow-inner">
           <button
-            onClick={() => setSelectedMealType('dinner')}
-            className={`
-              flex items-center gap-2 px-5 py-2.5 rounded-full text-xs font-black transition-all select-none
-              ${selectedMealType === 'dinner'
-                ? 'bg-[#22c55e]/20 text-[#4ade80] border border-[#22c55e]/40 shadow-[0_2px_12px_rgba(34,197,94,0.25)]'
-                : 'text-zinc-400 hover:text-zinc-200'
-              }
-            `}
+            type="button"
+            onClick={() => setSelectedDay('today')}
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
+              selectedDay === 'today'
+                ? 'bg-amber-500 text-black shadow-sm'
+                : 'text-zinc-400 hover:text-white'
+            }`}
           >
-            <Moon className="w-3.5 h-3.5" />
-            <span>Tonight&apos;s Dinner</span>
+            Today
+          </button>
+          <button
+            type="button"
+            onClick={() => setSelectedDay('tomorrow')}
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
+              selectedDay === 'tomorrow'
+                ? 'bg-amber-500 text-black shadow-sm'
+                : 'text-zinc-400 hover:text-white'
+            }`}
+          >
+            Tomorrow
           </button>
         </div>
       </div>
 
-      {/* HERO MENU CARD */}
-      {currentMenu ? (
-        <TactileCard
-          variant="elevated"
-          glow={currentStatus === 'eating' ? 'green' : 'none'}
-          className="p-6 sm:p-8 space-y-6 relative border-t border-zinc-700/40"
-        >
-          {/* Header & Cutoff Tag */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-800 pb-4">
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                <Badge
-                  variant={selectedMealType === 'dinner' ? 'green' : 'orange'}
-                  size="sm"
-                  icon={selectedMealType === 'dinner' ? <Moon className="w-3 h-3" /> : <Sun className="w-3 h-3" />}
-                >
-                  {selectedMealType.toUpperCase()} SPECIAL
-                </Badge>
-                <span className="text-xs text-zinc-400 font-bold">
-                  {new Date(currentMenu.date).toLocaleDateString(undefined, {
-                    weekday: 'short',
-                    month: 'short',
-                    day: 'numeric',
-                  })}
-                </span>
-              </div>
-              <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
-                {currentMenu.title}
-              </h2>
-            </div>
+      {/* 2. THREE BIG MEAL SELECTOR CARDS (EXACTLY LIKE ADMIN) */}
+      <div className="grid grid-cols-3 gap-2 sm:gap-2.5">
+        {(['breakfast', 'lunch', 'dinner'] as MealType[]).map((mealType) => {
+          const mealMenu = mealsForSelectedDay.find((m) => m.meal_type === mealType);
+          const mealBooking =
+            user && mealMenu
+              ? bookings.find(
+                  (b) => b.menu_id === mealMenu.id && b.profile_id === user.id
+                )
+              : undefined;
+          const status = mealBooking ? mealBooking.status : 'unbooked';
 
-            {/* Cutoff Status Badge */}
-            <div className={`
-              inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold self-start sm:self-auto
-              ${isCutoffPassed 
-                ? 'bg-red-950/40 text-red-400 border border-red-800/60' 
-                : 'bg-zinc-800 text-amber-300 border border-amber-500/30 animate-pulse-subtle'
-              }
-            `}>
-              <Clock className="w-3.5 h-3.5" />
-              <span>{timeRemainingText}</span>
-            </div>
-          </div>
+          const isSelected = selectedMealType === mealType;
+          const schedule = MEAL_SCHEDULES[mealType];
 
-          {/* APPETIZING MENU ITEMS LIST */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-black uppercase tracking-wider text-zinc-400 flex items-center gap-1.5">
-                <Flame className="w-3.5 h-3.5 text-orange-500" />
-                What&apos;s Cooking
+          const emoji = mealType === 'breakfast' ? '🍳' : mealType === 'lunch' ? '🍛' : '🍲';
+
+          // Selection styling
+          let activeStyles = 'bg-[#181818] text-zinc-300 border-2 border-zinc-800 border-b-6 border-b-zinc-900 hover:border-zinc-700';
+
+          if (isSelected) {
+            if (mealType === 'breakfast') {
+              activeStyles = 'bg-amber-500 text-black border-2 border-amber-400 border-b-6 border-b-amber-700 scale-[1.03] shadow-[0_6px_20px_rgba(245,158,11,0.35)]';
+            } else if (mealType === 'lunch') {
+              activeStyles = 'bg-orange-500 text-black border-2 border-orange-400 border-b-6 border-b-orange-700 scale-[1.03] shadow-[0_6px_20px_rgba(249,115,22,0.35)]';
+            } else {
+              activeStyles = 'bg-green-500 text-black border-2 border-green-400 border-b-6 border-b-green-700 scale-[1.03] shadow-[0_6px_20px_rgba(34,197,94,0.35)]';
+            }
+          }
+
+          return (
+            <button
+              key={mealType}
+              type="button"
+              onClick={() => setSelectedMealType(mealType)}
+              className={`
+                ${activeStyles}
+                p-3 sm:p-3.5 rounded-3xl flex flex-col items-center justify-center gap-1 transition-all select-none cursor-pointer relative
+              `}
+            >
+              {/* BOOKING STATUS DOT ON TOP CORNER */}
+              {status === 'eating' && (
+                <span className="absolute top-2 right-2 w-2.5 h-2.5 rounded-full bg-green-400 ring-2 ring-black" />
+              )}
+              {status === 'skipping' && (
+                <span className="absolute top-2 right-2 w-2.5 h-2.5 rounded-full bg-red-500 ring-2 ring-black" />
+              )}
+
+              <span className="text-2xl sm:text-3xl">{emoji}</span>
+              <span className="text-xs sm:text-sm font-black capitalize">{mealType}</span>
+              <span
+                className={`text-[10px] font-bold ${
+                  isSelected ? 'text-black/80 font-black' : 'text-zinc-500'
+                }`}
+              >
+                {schedule.servingTime}
               </span>
-              <span className="text-[11px] text-zinc-500 font-medium">All items included</span>
-            </div>
+            </button>
+          );
+        })}
+      </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              {(currentMenu.items as MenuItem[]).map((item, idx) => (
-                <motion.div
-                  key={item.id || idx}
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: idx * 0.05 }}
-                  className="flex items-center gap-3 p-3.5 rounded-2xl bg-[#171717] border border-zinc-800/80 hover:border-zinc-700 transition-colors"
-                >
-                  <div className="w-2.5 h-2.5 rounded-full flex-shrink-0 flex items-center justify-center border border-zinc-700">
-                    <span className={`w-1.5 h-1.5 rounded-full ${item.is_veg === false ? 'bg-red-500' : 'bg-green-500'}`} />
-                  </div>
-                  <span className="text-sm font-bold text-zinc-200">{item.name}</span>
-                </motion.div>
-              ))}
-            </div>
+      {/* 3. ACTIVE MEAL DETAIL & CONFIRMATION CARD (MINIMAL & CLEAN) */}
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={`${selectedDay}-${selectedMealType}`}
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -6 }}
+          transition={{ duration: 0.15 }}
+          className="p-4 sm:p-5 rounded-3xl bg-[#181818] border-2 border-zinc-700/80 border-b-6 border-b-zinc-900 space-y-4 shadow-xl"
+        >
+          {/* MEAL TITLE & CUTOFF */}
+          <div className="flex items-center justify-between gap-2 border-b border-zinc-800/80 pb-3">
+            <h3 className="text-base sm:text-lg font-black text-white leading-tight">
+              {activeMenu?.title || 'Menu not added yet'}
+            </h3>
 
-            {currentMenu.notes && (
-              <p className="text-xs text-zinc-400 italic pt-1 text-center">
-                &ldquo;{currentMenu.notes}&rdquo;
-              </p>
-            )}
+            <span className="inline-flex items-center gap-1 text-[11px] font-black uppercase px-2.5 py-1 rounded-full bg-zinc-900 text-zinc-400 border border-zinc-700 flex-shrink-0">
+              <Clock className="w-3 h-3 text-amber-400" />
+              Cutoff{' '}
+              {activeMenu
+                ? new Date(activeMenu.cutoff_time).toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })
+                : activeSchedule.cutoffTime}
+            </span>
           </div>
 
-          {/* CURRENT BOOKING STATUS FEEDBACK BANNER */}
-          <div className="pt-2">
-            <AnimatePresence mode="wait">
-              {currentStatus === 'eating' && (
-                <motion.div
-                  key="status-eating"
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.95 }}
-                  className="p-4 rounded-2xl bg-gradient-to-r from-green-950/70 to-emerald-950/50 border-2 border-green-500/40 text-center space-y-1 shadow-[0_4px_20px_rgba(34,197,94,0.15)]"
-                >
-                  <div className="inline-flex items-center gap-2 text-green-400 font-black text-base">
-                    <CheckCircle2 className="w-5 h-5 fill-green-500 text-black stroke-[2.5]" />
-                    <span>YOU ARE BOOKED TO EAT! 🍛</span>
+          {/* DISHES LIST */}
+          <div>
+            {!isMenuPending && activeMenu && (activeMenu.items as MenuItem[]).length > 0 ? (
+              <div className="grid grid-cols-2 gap-2">
+                {(activeMenu.items as MenuItem[]).map((item, idx) => (
+                  <div
+                    key={item.id || idx}
+                    className="flex items-center gap-2 p-2.5 rounded-2xl bg-[#121212] border border-zinc-800 text-xs font-bold text-zinc-200"
+                  >
+                    <span
+                      className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                        item.is_veg === false ? 'bg-red-500' : 'bg-green-500'
+                      }`}
+                    />
+                    <span className="truncate">{item.name}</span>
                   </div>
-                  <p className="text-xs text-zinc-300">
-                    Your plate is confirmed with the kitchen. Enjoy your hot meal!
-                  </p>
-                </motion.div>
-              )}
-
-              {currentStatus === 'skipping' && (
-                <motion.div
-                  key="status-skipping"
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.95 }}
-                  className="p-4 rounded-2xl bg-gradient-to-r from-red-950/60 to-orange-950/40 border-2 border-red-500/40 text-center space-y-1"
-                >
-                  <div className="inline-flex items-center gap-2 text-red-400 font-black text-base">
-                    <XCircle className="w-5 h-5 fill-red-500 text-black stroke-[2.5]" />
-                    <span>YOU ARE SKIPPING THIS MEAL 🛑</span>
-                  </div>
-                  <p className="text-xs text-zinc-300">
-                    Marked absent. No food will be prepared for you.
-                  </p>
-                </motion.div>
-              )}
-
-              {currentStatus === 'unbooked' && (
-                <motion.div
-                  key="status-unbooked"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className="p-3.5 rounded-2xl bg-zinc-900/90 border border-zinc-800 text-center text-xs text-zinc-400 font-medium"
-                >
-                  Please choose your meal preference before the cutoff time.
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-
-          {/* MASSIVE TACTILE TOGGLE SWITCH (EATING vs SKIPPING) */}
-          <div className="pt-2 space-y-3">
-            {isCutoffPassed ? (
-              <div className="p-4 rounded-2xl bg-zinc-900 border border-zinc-800 text-center space-y-1">
-                <p className="text-sm font-bold text-zinc-300 flex items-center justify-center gap-2">
-                  <AlertTriangle className="w-4 h-4 text-amber-500" />
-                  Booking Closed for this Meal
-                </p>
-                <p className="text-xs text-zinc-500">
-                  Cutoff deadline has passed. Contact the kitchen manager for emergency changes.
-                </p>
+                ))}
               </div>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                {/* MASSIVE GREEN EATING BUTTON */}
-                <TactileButton
-                  variant="green"
-                  size="massive"
-                  fullWidth
-                  onClick={() => handleToggle('eating')}
-                  isLoading={isToggling && currentStatus !== 'eating'}
-                  className={currentStatus === 'eating' ? 'ring-4 ring-green-400/50 scale-[1.02]' : ''}
-                  leftIcon={<UtensilsCrossed className="w-6 h-6 stroke-[2.8]" />}
-                >
-                  {currentStatus === 'eating' ? "✓ I'M EATING" : "I'LL EAT"}
-                </TactileButton>
-
-                {/* MASSIVE RED/ORANGE SKIPPING BUTTON */}
-                <TactileButton
-                  variant={currentStatus === 'skipping' ? 'red' : 'neutral'}
-                  size="massive"
-                  fullWidth
-                  onClick={() => handleToggle('skipping')}
-                  isLoading={isToggling && currentStatus !== 'skipping'}
-                  className={currentStatus === 'skipping' ? 'ring-4 ring-red-400/50 scale-[1.02]' : ''}
-                  leftIcon={<X className="w-6 h-6 stroke-[2.8]" />}
-                >
-                  {currentStatus === 'skipping' ? "✓ SKIPPING" : "SKIPPING"}
-                </TactileButton>
+              <div className="py-3 px-4 rounded-2xl bg-[#121212] border border-zinc-800 text-center">
+                <p className="text-xs font-bold text-zinc-400">
+                  👨‍🍳 Menu items updating from kitchen • Plate booking is open
+                </p>
               </div>
             )}
+          </div>
 
-            {!isCutoffPassed && (
-              <p className="text-[11px] text-zinc-400 text-center font-medium">
-                ⚡ Tap either button to lock in your attendance. You can change your choice anytime before cutoff.
-              </p>
+          {/* 3D TACTILE CONFIRMATION BUTTONS */}
+          <div className="pt-1">
+            {isCutoffPassed ? (
+              <div className="py-2.5 px-4 rounded-2xl bg-zinc-900 border border-zinc-800 text-center text-xs font-bold text-zinc-500">
+                🔒 Booking deadline passed for this meal
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-2.5">
+                {/* RED SKIP BUTTON */}
+                <button
+                  type="button"
+                  onClick={() => handleSelectStatus('skipping')}
+                  disabled={isLoading}
+                  className={`
+                    py-3 sm:py-3.5 px-4 rounded-2xl font-black text-xs sm:text-sm flex items-center justify-center gap-1.5
+                    transition-all select-none cursor-pointer
+                    ${
+                      currentStatus === 'skipping'
+                        ? 'bg-red-500 text-white border-b-4 border-b-red-700 shadow-md scale-[1.02]'
+                        : 'bg-[#2a1b1b] hover:bg-red-950/90 text-red-400 border border-red-500/40 border-b-4 border-b-[#190f0f] active:border-b-0 active:translate-y-1'
+                    }
+                  `}
+                >
+                  <X className="w-4 h-4 stroke-[3]" />
+                  <span>{currentStatus === 'skipping' ? 'Skipping' : 'Skip'}</span>
+                </button>
+
+                {/* GREEN EAT BUTTON */}
+                <button
+                  type="button"
+                  onClick={() => handleSelectStatus('eating')}
+                  disabled={isLoading}
+                  className={`
+                    py-3 sm:py-3.5 px-4 rounded-2xl font-black text-xs sm:text-sm flex items-center justify-center gap-1.5
+                    transition-all select-none cursor-pointer
+                    ${
+                      currentStatus === 'eating'
+                        ? 'bg-green-500 text-black border-b-4 border-b-green-700 shadow-md scale-[1.02]'
+                        : 'bg-[#1b2a1e] hover:bg-green-950/90 text-green-400 border border-green-500/40 border-b-4 border-b-[#0f1910] active:border-b-0 active:translate-y-1'
+                    }
+                  `}
+                >
+                  <Check className="w-4 h-4 stroke-[3]" />
+                  <span>{currentStatus === 'eating' ? 'Eating' : 'Eat'}</span>
+                </button>
+              </div>
             )}
           </div>
-        </TactileCard>
-      ) : (
-        <TactileCard className="p-8 text-center text-zinc-400">
-          <p>No published menu found for this meal.</p>
-        </TactileCard>
-      )}
+        </motion.div>
+      </AnimatePresence>
     </div>
   );
 }

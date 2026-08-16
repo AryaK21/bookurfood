@@ -13,7 +13,7 @@ export function LoginForm() {
   const router = useRouter();
   const { sendOtp, verifyOtp, loginAsDemoUser, error, clearError } = useAuth();
 
-  const [phone, setPhone] = useState('+919876543211');
+  const [phone, setPhone] = useState('+91 ');
   const [otp, setOtp] = useState('');
   const [step, setStep] = useState<'phone' | 'otp' | 'rejected'>('phone');
   const [loading, setLoading] = useState(false);
@@ -251,74 +251,6 @@ export function LoginForm() {
             </motion.div>
           )}
         </AnimatePresence>
-      </TactileCard>
-
-      {/* QUICK DEMO PERSONA SELECTOR FOR INSTANT PAIR-PROGRAMMING TEST */}
-      <TactileCard variant="default" className="p-5">
-        <div className="flex items-center gap-2 mb-3">
-          <Sparkles className="w-4 h-4 text-amber-400" />
-          <h4 className="text-xs font-black uppercase tracking-wider text-zinc-300">
-            1-Click Demo Accounts (Instant Test)
-          </h4>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-          <button
-            type="button"
-            onClick={async () => {
-              await loginAsDemoUser('resident', '+919876543211');
-              router.push('/');
-            }}
-            className="p-2.5 rounded-xl bg-[#141414] border border-zinc-700/60 hover:border-green-500/50 hover:bg-zinc-800/80 text-left transition-all group"
-          >
-            <span className="block text-xs font-bold text-white group-hover:text-green-400">
-              Aarav Sharma
-            </span>
-            <span className="text-[10px] text-zinc-400 block">Resident • Room 204</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={async () => {
-              await loginAsDemoUser('resident', '+919876543212');
-              router.push('/');
-            }}
-            className="p-2.5 rounded-xl bg-[#141414] border border-zinc-700/60 hover:border-green-500/50 hover:bg-zinc-800/80 text-left transition-all group"
-          >
-            <span className="block text-xs font-bold text-white group-hover:text-green-400">
-              Rohan Verma
-            </span>
-            <span className="text-[10px] text-zinc-400 block">Resident • Room 108</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={async () => {
-              await loginAsDemoUser('admin', '+919876543210');
-              router.push('/admin');
-            }}
-            className="p-2.5 rounded-xl bg-[#141414] border border-amber-600/40 hover:border-amber-500 hover:bg-amber-950/20 text-left transition-all group"
-          >
-            <span className="block text-xs font-bold text-amber-300 group-hover:text-amber-200">
-              Manager Rao
-            </span>
-            <span className="text-[10px] text-amber-400/80 block">Admin • Full Access</span>
-          </button>
-        </div>
-
-        {/* Test unwhitelisted rejection button */}
-        <div className="mt-3 pt-2.5 border-t border-zinc-800 flex items-center justify-between">
-          <span className="text-[11px] text-zinc-400">Test Anti-Spam Rejection:</span>
-          <button
-            type="button"
-            onClick={() => {
-              setPhone('+919999999999');
-              setStep('phone');
-            }}
-            className="text-[11px] font-bold text-red-400 hover:underline"
-          >
-            Load Unregistered +919999999999
-          </button>
-        </div>
       </TactileCard>
     </div>
   );

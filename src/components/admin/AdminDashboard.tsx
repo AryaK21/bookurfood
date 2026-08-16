@@ -2,29 +2,32 @@
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/lib/auth/auth-context';
-import { DataStore } from '@/lib/data/data-store';
-import type { Menu, Profile, Booking, MenuItem } from '@/types/database.types';
-import { TactileButton } from '@/components/ui/TactileButton';
-import { TactileCard } from '@/components/ui/TactileCard';
-import { Badge } from '@/components/ui/Badge';
-import { 
-  Users, 
-  Utensils, 
-  Plus, 
-  Trash2, 
-  CheckCircle2, 
-  XCircle, 
-  Clock, 
-  Copy, 
-  Sun, 
-  Moon, 
-  Search, 
-  UserPlus, 
-  ChefHat, 
-  BellRing,
-  ShieldCheck,
-  Phone,
-  Flame
+import { DataStore, MEAL_SCHEDULES } from '@/lib/data/data-store';
+import type { Menu, Profile, Booking, MenuItem, MealType } from '@/types/database.types';
+import {
+  ChefHat,
+  Users,
+  Utensils,
+  Plus,
+  Trash2,
+  CheckCircle2,
+  XCircle,
+  X,
+  Clock,
+  Copy,
+  Sun,
+  Moon,
+  Coffee,
+  Search,
+  UserPlus,
+  Flame,
+  Check,
+  Calendar,
+  Sparkles,
+  ChevronDown,
+  ChevronUp,
+  Settings2,
+  RotateCcw,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -32,27 +35,37 @@ export function AdminDashboard() {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<'headcount' | 'menu' | 'residents'>('headcount');
 
+  const [selectedMealType, setSelectedMealType] = useState<MealType>('lunch');
+  const [selectedDay, setSelectedDay] = useState<'today' | 'tomorrow'>('today');
+
   const [menus, setMenus] = useState<Menu[]>([]);
-  const [selectedMealType, setSelectedMealType] = useState<'lunch' | 'dinner'>('dinner');
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
 
-  // Add resident form state
+  // Simple 2-field menu form state
+  const [menuTitle, setMenuTitle] = useState('');
+  const [menuItemsText, setMenuItemsText] = useState('');
+  const [menuCutoffHour, setMenuCutoffHour] = useState('11:30');
+  const [menuNotes, setMenuNotes] = useState('');
+  const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
+  const [menuFeedback, setMenuFeedback] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  // Add resident simple form state
   const [newResidentName, setNewResidentName] = useState('');
-  const [newResidentPhone, setNewResidentPhone] = useState('+91');
+  const [newResidentPhone, setNewResidentPhone] = useState('+91 ');
   const [newResidentRoom, setNewResidentRoom] = useState('');
   const [residentSearchQuery, setResidentSearchQuery] = useState('');
   const [residentAddError, setResidentAddError] = useState('');
   const [residentAddSuccess, setResidentAddSuccess] = useState('');
 
-  // Menu editor form state
-  const [menuTitle, setMenuTitle] = useState('');
-  const [menuItemsText, setMenuItemsText] = useState('');
-  const [menuCutoffHour, setMenuCutoffHour] = useState('17:00');
-  const [menuNotes, setMenuNotes] = useState('');
-  const [menuSaveSuccess, setMenuSaveSuccess] = useState('');
-
   const [copiedSummary, setCopiedSummary] = useState(false);
+
+  const todayStr = new Date().toISOString().split('T')[0];
+  const tomorrowDate = new Date();
+  tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+  const tomorrowStr = tomorrowDate.toISOString().split('T')[0];
+
+  const targetDateStr = selectedDay === 'today' ? todayStr : tomorrowStr;
 
   const refreshAdminData = () => {
     const loadedMenus = DataStore.getMenus();
@@ -67,21 +80,34 @@ export function AdminDashboard() {
     refreshAdminData();
   }, []);
 
-  const activeMenu = menus.find((m) => m.meal_type === selectedMealType) || menus[0];
+  // Find active menu or placeholder for selected meal and day
+  const mealsForSelectedDay = DataStore.getMealsForDate(targetDateStr);
+  const activeMenu =
+    mealsForSelectedDay.find((m) => m.meal_type === selectedMealType) ||
+    mealsForSelectedDay[0];
 
-  // Initialize menu editor when activeMenu changes
+  const hasExistingCustomMenu =
+    activeMenu &&
+    activeMenu.title !== 'Menu not added yet' &&
+    !activeMenu.id.startsWith('unconfigured-');
+
+  // Initialize menu editor when activeMenu or selectedMealType changes
   useEffect(() => {
     if (activeMenu) {
-      setMenuTitle(activeMenu.title);
+      const isPlaceholder = activeMenu.title === 'Menu not added yet';
+      setMenuTitle(isPlaceholder ? '' : activeMenu.title);
+
       const itemsList = (activeMenu.items as MenuItem[]).map((i) => i.name).join(', ');
       setMenuItemsText(itemsList);
+
       const cutoff = new Date(activeMenu.cutoff_time);
       const hh = String(cutoff.getHours()).padStart(2, '0');
       const mm = String(cutoff.getMinutes()).padStart(2, '0');
       setMenuCutoffHour(`${hh}:${mm}`);
+
       setMenuNotes(activeMenu.notes || '');
     }
-  }, [activeMenu, selectedMealType]);
+  }, [activeMenu?.id, selectedMealType, selectedDay]);
 
   // Headcount calculation
   const activeResidents = profiles.filter((p) => p.role === 'resident' && p.is_active);
@@ -89,29 +115,108 @@ export function AdminDashboard() {
     ? DataStore.getHeadcount(activeMenu.id, activeResidents.length)
     : { eating: 0, skipping: 0, unbooked: 0, total: activeResidents.length, percentage: 0 };
 
-  // Handle Add Resident to Whitelist
+  // Handle Save Menu (Simplified for food operator)
+  const handleSaveMenu = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeMenu) return;
+
+    const titleToSave = menuTitle.trim() || `${selectedMealType.toUpperCase()} Special`;
+
+    const rawItems = menuItemsText.trim() ? menuItemsText.split(',') : [titleToSave];
+    const itemsArray: MenuItem[] = rawItems
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map((name, i) => ({
+        id: `item-${Date.now()}-${i}`,
+        name,
+        category: 'main',
+        is_veg:
+          !name.toLowerCase().includes('chicken') &&
+          !name.toLowerCase().includes('mutton') &&
+          !name.toLowerCase().includes('egg') &&
+          !name.toLowerCase().includes('fish') &&
+          !name.toLowerCase().includes('non-veg') &&
+          !name.toLowerCase().includes('non veg'),
+      }));
+
+    const [hh, mm] = menuCutoffHour.split(':').map(Number);
+    const [y, m, d] = targetDateStr.split('-').map(Number);
+    const cutoffDate = new Date(y, m - 1, d, hh || 12, mm || 0, 0);
+
+    const schedule = MEAL_SCHEDULES[selectedMealType];
+
+    try {
+      await DataStore.saveMenu({
+        id: activeMenu.id,
+        date: targetDateStr,
+        meal_type: selectedMealType,
+        title: titleToSave,
+        items: itemsArray,
+        cutoff_time: cutoffDate.toISOString(),
+        serving_start: schedule.servingStart,
+        serving_end: schedule.servingEnd,
+        notes: menuNotes || `Served fresh between ${schedule.servingTime}`,
+        is_published: true,
+      });
+
+      setMenuFeedback({
+        text: `✓ ${selectedMealType.toUpperCase()} menu published to residents!`,
+        type: 'success',
+      });
+      setTimeout(() => setMenuFeedback(null), 3500);
+      refreshAdminData();
+    } catch (err: any) {
+      setMenuFeedback({ text: err.message || 'Failed to save menu', type: 'error' });
+    }
+  };
+
+  // Handle Delete / Reset Menu
+  const handleDeleteMenu = async () => {
+    if (!confirm(`Are you sure you want to delete the ${selectedMealType.toUpperCase()} menu for ${selectedDay}?`)) {
+      return;
+    }
+
+    try {
+      await DataStore.deleteMenu(targetDateStr, selectedMealType);
+      setMenuTitle('');
+      setMenuItemsText('');
+      setMenuFeedback({ text: `✓ ${selectedMealType.toUpperCase()} menu deleted.`, type: 'success' });
+      setTimeout(() => setMenuFeedback(null), 3000);
+      refreshAdminData();
+    } catch (err: any) {
+      setMenuFeedback({ text: err.message || 'Failed to delete menu', type: 'error' });
+    }
+  };
+
+  // 1-Tap Quick presets (Multiple options: Veg Thali, Non-Veg Thali, Biryani, etc.)
+  const applyQuickMeal = (title: string, dishes: string) => {
+    setMenuTitle(title);
+    setMenuItemsText(dishes);
+  };
+
+  // Handle Add Resident
   const handleAddResident = async (e: React.FormEvent) => {
     e.preventDefault();
     setResidentAddError('');
     setResidentAddSuccess('');
 
     if (!newResidentName || !newResidentPhone || newResidentPhone.length < 10) {
-      setResidentAddError('Please enter a valid resident name and mobile number.');
+      setResidentAddError('Please enter the resident name and mobile number.');
       return;
     }
 
     try {
       await DataStore.addProfile({
-        name: newResidentName,
-        phone_number: newResidentPhone,
-        room_number: newResidentRoom || null,
+        name: newResidentName.trim(),
+        phone_number: newResidentPhone.trim(),
+        room_number: newResidentRoom.trim() || null,
         role: 'resident',
         is_active: true,
       });
 
-      setResidentAddSuccess(`Added ${newResidentName} to the resident whitelist!`);
+      setResidentAddSuccess(`✓ Added ${newResidentName} to resident list!`);
       setNewResidentName('');
-      setNewResidentPhone('+91');
+      setNewResidentPhone('+91 ');
       setNewResidentRoom('');
       refreshAdminData();
     } catch (err: any) {
@@ -121,7 +226,7 @@ export function AdminDashboard() {
 
   // Handle Remove Resident
   const handleRemoveResident = async (id: string, name: string) => {
-    if (confirm(`Remove ${name} from the resident whitelist? They will no longer be able to log in.`)) {
+    if (confirm(`Remove ${name} from resident list?`)) {
       try {
         await DataStore.removeProfile(id);
         refreshAdminData();
@@ -131,59 +236,9 @@ export function AdminDashboard() {
     }
   };
 
-  // Handle Save Menu
-  const handleSaveMenu = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!activeMenu) return;
-
-    const itemsArray: MenuItem[] = menuItemsText
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean)
-      .map((name, i) => ({
-        id: `item-${Date.now()}-${i}`,
-        name,
-        category: 'main',
-        is_veg: !name.toLowerCase().includes('chicken') && !name.toLowerCase().includes('mutton') && !name.toLowerCase().includes('egg'),
-      }));
-
-    const [hh, mm] = menuCutoffHour.split(':').map(Number);
-    const cutoffDate = new Date();
-    cutoffDate.setHours(hh || 17, mm || 0, 0, 0);
-
-    try {
-      await DataStore.saveMenu({
-        id: activeMenu.id,
-        date: activeMenu.date,
-        meal_type: selectedMealType,
-        title: menuTitle,
-        items: itemsArray,
-        cutoff_time: cutoffDate.toISOString(),
-        notes: menuNotes,
-        is_published: true,
-      });
-
-      setMenuSaveSuccess('Menu updated and published to residents!');
-      setTimeout(() => setMenuSaveSuccess(''), 3000);
-      refreshAdminData();
-    } catch (err: any) {
-      alert(err.message || 'Failed to save menu');
-    }
-  };
-
-  // Generate WhatsApp summary
+  // WhatsApp Kitchen Copy
   const copyKitchenSummary = () => {
-    const eatingResidents = activeResidents.filter((p) => {
-      const b = bookings.find((bk) => bk.menu_id === activeMenu?.id && bk.profile_id === p.id);
-      return b?.status === 'eating';
-    });
-
-    const skippingResidents = activeResidents.filter((p) => {
-      const b = bookings.find((bk) => bk.menu_id === activeMenu?.id && bk.profile_id === p.id);
-      return b?.status === 'skipping';
-    });
-
-    const text = `📋 *PG CANTEEN HEADCOUNT REPORT*\n*Meal:* ${selectedMealType.toUpperCase()} (${activeMenu?.title})\n*Date:* ${new Date().toLocaleDateString()}\n\n🍽️ *TOTAL EATING:* ${headcount.eating} / ${headcount.total} (${headcount.percentage}%)\n🛑 *SKIPPING:* ${headcount.skipping}\n⏳ *UNBOOKED:* ${headcount.unbooked}\n\n*Eating List:*\n${eatingResidents.map((r, i) => `${i + 1}. ${r.name} (Room ${r.room_number || 'N/A'})`).join('\n') || 'None'}\n\n*Generated via FoodBook App*`;
+    const text = `📋 *PG KITCHEN HEADCOUNT REPORT*\n*Meal:* ${selectedMealType.toUpperCase()} (${activeMenu?.title || 'Daily Meal'})\n*Date:* ${targetDateStr}\n\n🍽️ *TOTAL PLATES TO COOK:* ${headcount.eating} / ${headcount.total}\n🛑 *SKIPPING:* ${headcount.skipping}\n⏳ *PENDING:* ${headcount.unbooked}\n\n*Generated via FoodBook*`;
 
     navigator.clipboard.writeText(text);
     setCopiedSummary(true);
@@ -191,460 +246,604 @@ export function AdminDashboard() {
   };
 
   return (
-    <div className="w-full max-w-4xl mx-auto space-y-6 pb-16">
-      {/* ADMIN PORTAL HEADER */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-black mb-1">
-            <ShieldCheck className="w-3.5 h-3.5" />
-            <span>CANTEEN MANAGEMENT PORTAL</span>
-          </div>
-          <h1 className="text-3xl sm:text-4xl font-black text-white tracking-tight">
-            Admin <span className="text-amber-400">Dashboard</span>
-          </h1>
-        </div>
+    <div className="w-full max-w-md mx-auto pb-28 pt-1 space-y-4">
+      {/* CLEAN HEADER WITH DAY TOGGLE (ONLY FOR HEADCOUNT & MENU) */}
+      <div className="flex items-center justify-between px-1">
+        <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+          {activeTab === 'headcount' && 'Kitchen Headcount'}
+          {activeTab === 'menu' && 'Food Menu'}
+          {activeTab === 'residents' && 'Resident Directory'}
+        </h1>
 
-        {/* Tab Switcher Pills */}
-        <div className="p-1 rounded-full bg-[#181818] border border-zinc-800 flex items-center gap-1">
-          <button
-            onClick={() => setActiveTab('headcount')}
-            className={`px-4 py-2 rounded-full text-xs font-black transition-all ${
-              activeTab === 'headcount'
-                ? 'bg-amber-500 text-black shadow-md'
-                : 'text-zinc-400 hover:text-white'
-            }`}
-          >
-            Headcount
-          </button>
-          <button
-            onClick={() => setActiveTab('menu')}
-            className={`px-4 py-2 rounded-full text-xs font-black transition-all ${
-              activeTab === 'menu'
-                ? 'bg-amber-500 text-black shadow-md'
-                : 'text-zinc-400 hover:text-white'
-            }`}
-          >
-            Edit Menu
-          </button>
-          <button
-            onClick={() => setActiveTab('residents')}
-            className={`px-4 py-2 rounded-full text-xs font-black transition-all ${
-              activeTab === 'residents'
-                ? 'bg-amber-500 text-black shadow-md'
-                : 'text-zinc-400 hover:text-white'
-            }`}
-          >
-            Whitelist ({activeResidents.length})
-          </button>
-        </div>
+        {/* DAY TOGGLE (TODAY vs TOMORROW) - ONLY FOR HEADCOUNT & MENU */}
+        {activeTab !== 'residents' && (
+          <div className="p-1 rounded-2xl bg-[#181818] border border-zinc-800 flex items-center gap-1 shadow-inner">
+            <button
+              type="button"
+              onClick={() => setSelectedDay('today')}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                selectedDay === 'today' ? 'bg-amber-500 text-black shadow-sm' : 'text-zinc-400 hover:text-white'
+              }`}
+            >
+              Today
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedDay('tomorrow')}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                selectedDay === 'tomorrow' ? 'bg-amber-500 text-black shadow-sm' : 'text-zinc-400 hover:text-white'
+              }`}
+            >
+              Tomorrow
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* TAB 1: HEADCOUNT OVERVIEW */}
-      {activeTab === 'headcount' && (
-        <div className="space-y-6">
-          {/* Meal Type Switcher for Headcount */}
-          <div className="flex items-center justify-between flex-wrap gap-3">
-            <div className="p-1 rounded-full bg-[#181818] border border-zinc-800 inline-flex items-center gap-1">
-              <button
-                onClick={() => setSelectedMealType('lunch')}
-                className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-bold transition-all ${
-                  selectedMealType === 'lunch'
-                    ? 'bg-orange-500 text-black'
-                    : 'text-zinc-400 hover:text-white'
-                }`}
-              >
-                <Sun className="w-3.5 h-3.5" />
-                Lunch
-              </button>
-              <button
-                onClick={() => setSelectedMealType('dinner')}
-                className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-bold transition-all ${
-                  selectedMealType === 'dinner'
-                    ? 'bg-green-500 text-black'
-                    : 'text-zinc-400 hover:text-white'
-                }`}
-              >
-                <Moon className="w-3.5 h-3.5" />
-                Dinner
-              </button>
-            </div>
+      {/* ============================================================= */}
+      {/* BIG MEAL SELECTOR CARDS (Breakfast • Lunch • Dinner)           */}
+      {/* ============================================================= */}
+      {(activeTab === 'headcount' || activeTab === 'menu') && (
+        <div className="grid grid-cols-3 gap-2 sm:gap-2.5">
+          {/* Breakfast Card */}
+          <button
+            type="button"
+            onClick={() => setSelectedMealType('breakfast')}
+            className={`
+              p-3 sm:p-3.5 rounded-3xl flex flex-col items-center justify-center gap-1 transition-all select-none cursor-pointer
+              ${
+                selectedMealType === 'breakfast'
+                  ? 'bg-amber-500 text-black border-2 border-amber-400 border-b-6 border-b-amber-700 scale-[1.03] shadow-[0_6px_20px_rgba(245,158,11,0.35)]'
+                  : 'bg-[#181818] text-zinc-300 border-2 border-zinc-800 border-b-6 border-b-zinc-900 hover:border-zinc-700'
+              }
+            `}
+          >
+            <span className="text-2xl sm:text-3xl">🍳</span>
+            <span className="text-xs sm:text-sm font-black capitalize">Breakfast</span>
+            <span className={`text-[10px] font-bold ${selectedMealType === 'breakfast' ? 'text-black/80 font-black' : 'text-zinc-500'}`}>
+              8:00 - 10:30 AM
+            </span>
+          </button>
 
-            <TactileButton
-              variant="neutral"
-              size="sm"
-              onClick={copyKitchenSummary}
-              leftIcon={<Copy className="w-4 h-4 text-green-400" />}
-            >
-              {copiedSummary ? '✓ Copied for Kitchen!' : 'Copy WhatsApp Report'}
-            </TactileButton>
-          </div>
+          {/* Lunch Card */}
+          <button
+            type="button"
+            onClick={() => setSelectedMealType('lunch')}
+            className={`
+              p-3 sm:p-3.5 rounded-3xl flex flex-col items-center justify-center gap-1 transition-all select-none cursor-pointer
+              ${
+                selectedMealType === 'lunch'
+                  ? 'bg-orange-500 text-black border-2 border-orange-400 border-b-6 border-b-orange-700 scale-[1.03] shadow-[0_6px_20px_rgba(249,115,22,0.35)]'
+                  : 'bg-[#181818] text-zinc-300 border-2 border-zinc-800 border-b-6 border-b-zinc-900 hover:border-zinc-700'
+              }
+            `}
+          >
+            <span className="text-2xl sm:text-3xl">🍛</span>
+            <span className="text-xs sm:text-sm font-black capitalize">Lunch</span>
+            <span className={`text-[10px] font-bold ${selectedMealType === 'lunch' ? 'text-black/80 font-black' : 'text-zinc-500'}`}>
+              12:30 - 2:00 PM
+            </span>
+          </button>
 
-          {/* MASSIVE TYPOGRAPHY HEADCOUNT HERO CARD */}
-          <TactileCard variant="elevated" glow="green" className="p-7 sm:p-9 text-center space-y-6">
-            <div className="space-y-2">
-              <Badge variant="green" size="md">
-                LIVE HEADCOUNT • {selectedMealType.toUpperCase()}
-              </Badge>
-              {/* BIG TYPOGRAPHY */}
-              <div className="pt-2">
-                <span className="text-6xl sm:text-7xl font-black text-white tracking-tighter">
-                  {headcount.eating}
-                </span>
-                <span className="text-3xl sm:text-4xl font-bold text-zinc-500 tracking-tight">
-                  {' '}/ {headcount.total}
-                </span>
-              </div>
-              <p className="text-lg font-black text-green-400 uppercase tracking-wide">
-                Residents Eating Today
-              </p>
-            </div>
-
-            {/* Progress Bar */}
-            <div className="w-full max-w-md mx-auto space-y-2">
-              <div className="h-4 w-full bg-zinc-800 rounded-full overflow-hidden p-0.5 border border-zinc-700">
-                <motion.div
-                  initial={{ width: 0 }}
-                  animate={{ width: `${headcount.percentage}%` }}
-                  transition={{ duration: 0.8, ease: 'easeOut' }}
-                  className="h-full bg-gradient-to-r from-green-500 to-emerald-400 rounded-full"
-                />
-              </div>
-              <div className="flex items-center justify-between text-xs font-bold text-zinc-400">
-                <span>{headcount.percentage}% Turnout</span>
-                <span>Cutoff: {new Date(activeMenu?.cutoff_time || '').toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-              </div>
-            </div>
-
-            {/* Three Breakdown Cards */}
-            <div className="grid grid-cols-3 gap-3 pt-2">
-              <div className="p-4 rounded-2xl bg-green-950/30 border border-green-800/40">
-                <span className="text-2xl sm:text-3xl font-black text-green-400 block">
-                  {headcount.eating}
-                </span>
-                <span className="text-[11px] font-bold text-zinc-400 uppercase">Eating</span>
-              </div>
-
-              <div className="p-4 rounded-2xl bg-red-950/30 border border-red-800/40">
-                <span className="text-2xl sm:text-3xl font-black text-red-400 block">
-                  {headcount.skipping}
-                </span>
-                <span className="text-[11px] font-bold text-zinc-400 uppercase">Skipping</span>
-              </div>
-
-              <div className="p-4 rounded-2xl bg-zinc-900 border border-zinc-800">
-                <span className="text-2xl sm:text-3xl font-black text-zinc-400 block">
-                  {headcount.unbooked}
-                </span>
-                <span className="text-[11px] font-bold text-zinc-500 uppercase">Pending</span>
-              </div>
-            </div>
-          </TactileCard>
-
-          {/* RESIDENT-BY-RESIDENT ATTENDANCE TABLE */}
-          <TactileCard variant="default" className="p-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-black text-white flex items-center gap-2">
-                <Users className="w-4 h-4 text-green-400" />
-                Resident Attendance Breakdown
-              </h3>
-              <span className="text-xs text-zinc-400 font-bold">
-                {activeResidents.length} Total Registered
-              </span>
-            </div>
-
-            <div className="divide-y divide-zinc-800/80">
-              {activeResidents.map((res) => {
-                const b = bookings.find((bk) => bk.menu_id === activeMenu?.id && bk.profile_id === res.id);
-                const status = b ? b.status : 'pending';
-
-                return (
-                  <div key={res.id} className="py-3.5 flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-zinc-800 text-zinc-200 flex items-center justify-center text-xs font-black">
-                        {res.name.charAt(0)}
-                      </div>
-                      <div>
-                        <p className="text-sm font-bold text-white leading-tight">{res.name}</p>
-                        <p className="text-xs text-zinc-400">
-                          Room {res.room_number || 'N/A'} • {res.phone_number}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div>
-                      {status === 'eating' && (
-                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black bg-green-500/20 text-green-400 border border-green-500/40">
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          Eating
-                        </span>
-                      )}
-                      {status === 'skipping' && (
-                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black bg-red-500/20 text-red-400 border border-red-500/40">
-                          <XCircle className="w-3.5 h-3.5" />
-                          Skipping
-                        </span>
-                      )}
-                      {status === 'pending' && (
-                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-zinc-800 text-zinc-400">
-                          <Clock className="w-3.5 h-3.5" />
-                          Unbooked
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </TactileCard>
+          {/* Dinner Card */}
+          <button
+            type="button"
+            onClick={() => setSelectedMealType('dinner')}
+            className={`
+              p-3 sm:p-3.5 rounded-3xl flex flex-col items-center justify-center gap-1 transition-all select-none cursor-pointer
+              ${
+                selectedMealType === 'dinner'
+                  ? 'bg-green-500 text-black border-2 border-green-400 border-b-6 border-b-green-700 scale-[1.03] shadow-[0_6px_20px_rgba(34,197,94,0.35)]'
+                  : 'bg-[#181818] text-zinc-300 border-2 border-zinc-800 border-b-6 border-b-zinc-900 hover:border-zinc-700'
+              }
+            `}
+          >
+            <span className="text-2xl sm:text-3xl">🍲</span>
+            <span className="text-xs sm:text-sm font-black capitalize">Dinner</span>
+            <span className={`text-[10px] font-bold ${selectedMealType === 'dinner' ? 'text-black/80 font-black' : 'text-zinc-500'}`}>
+              7:30 - 9:30 PM
+            </span>
+          </button>
         </div>
       )}
 
-      {/* TAB 2: MENU EDITOR */}
-      {activeTab === 'menu' && (
-        <TactileCard variant="elevated" className="p-7 space-y-6">
-          <div className="flex items-center justify-between border-b border-zinc-800 pb-4">
+      {/* ============================================================= */}
+      {/* TAB 1: KITCHEN HEADCOUNT (ONLY HEADCOUNT NUMBERS - NO NAMES)  */}
+      {/* ============================================================= */}
+      {activeTab === 'headcount' && (
+        <div className="space-y-3.5">
+          {/* CURRENT MEAL TITLE */}
+          <div className="p-3.5 rounded-2xl bg-[#181818] border border-zinc-800 flex items-center justify-between gap-2">
             <div>
-              <h2 className="text-xl font-black text-white flex items-center gap-2">
-                <ChefHat className="w-5 h-5 text-amber-400" />
-                Set Daily Menu & Cutoff Time
-              </h2>
-              <p className="text-xs text-zinc-400">
-                Changes reflect instantly on resident screens.
+              <p className="text-xs font-black text-amber-400 uppercase tracking-wide">
+                {selectedMealType} Menu
+              </p>
+              <p className="text-sm font-black text-white truncate max-w-[220px]">
+                {activeMenu.title}
               </p>
             </div>
+            <span className="text-[11px] font-black uppercase px-2.5 py-1 rounded-full bg-zinc-900 text-zinc-300 border border-zinc-700">
+              Cutoff {new Date(activeMenu.cutoff_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </span>
+          </div>
 
-            <div className="p-1 rounded-full bg-[#181818] border border-zinc-800 inline-flex items-center gap-1">
-              <button
-                type="button"
-                onClick={() => setSelectedMealType('lunch')}
-                className={`px-3 py-1 rounded-full text-xs font-bold ${
-                  selectedMealType === 'lunch' ? 'bg-amber-500 text-black' : 'text-zinc-400'
-                }`}
-              >
-                Lunch
-              </button>
-              <button
-                type="button"
-                onClick={() => setSelectedMealType('dinner')}
-                className={`px-3 py-1 rounded-full text-xs font-bold ${
-                  selectedMealType === 'dinner' ? 'bg-amber-500 text-black' : 'text-zinc-400'
-                }`}
-              >
-                Dinner
-              </button>
+          {/* GIANT HEADCOUNT SUMMARY CARDS */}
+          <div className="grid grid-cols-3 gap-2.5">
+            {/* Plates to cook */}
+            <div className="p-4 sm:p-5 rounded-3xl bg-[#132516] border-2 border-green-500/80 border-b-6 border-b-green-700 text-center space-y-0.5 shadow-lg">
+              <span className="text-4xl sm:text-5xl font-black text-green-400 block tracking-tight">
+                {headcount.eating}
+              </span>
+              <span className="text-[11px] sm:text-xs font-black uppercase text-green-300">
+                Plates to Cook
+              </span>
+            </div>
+
+            {/* Skipping */}
+            <div className="p-4 sm:p-5 rounded-3xl bg-[#251414] border-2 border-red-500/70 border-b-6 border-b-red-800 text-center space-y-0.5">
+              <span className="text-4xl sm:text-5xl font-black text-red-400 block tracking-tight">
+                {headcount.skipping}
+              </span>
+              <span className="text-[11px] sm:text-xs font-black uppercase text-red-300">
+                Skipping
+              </span>
+            </div>
+
+            {/* Unbooked */}
+            <div className="p-4 sm:p-5 rounded-3xl bg-[#1c1c1c] border-2 border-zinc-700 border-b-6 border-b-zinc-850 text-center space-y-0.5">
+              <span className="text-4xl sm:text-5xl font-black text-zinc-400 block tracking-tight">
+                {headcount.unbooked}
+              </span>
+              <span className="text-[11px] sm:text-xs font-black uppercase text-zinc-400">
+                Pending
+              </span>
             </div>
           </div>
 
-          {menuSaveSuccess && (
-            <div className="p-3.5 rounded-2xl bg-green-950/40 border border-green-800/60 text-xs text-green-300 flex items-center gap-2 font-bold">
-              <CheckCircle2 className="w-4 h-4 text-green-400" />
-              <span>{menuSaveSuccess}</span>
+          {/* 1-TAP COPY FOR WHATSAPP BUTTON */}
+          <button
+            type="button"
+            onClick={copyKitchenSummary}
+            className="w-full py-3.5 px-4 rounded-2xl bg-green-500 hover:bg-green-400 text-black font-black text-sm border-b-4 border-b-green-700 active:border-b-0 active:translate-y-1 flex items-center justify-center gap-2 cursor-pointer shadow-md transition-all"
+          >
+            <Copy className="w-4 h-4" />
+            <span>{copiedSummary ? '✓ Copied to Clipboard!' : 'Copy Headcount for WhatsApp'}</span>
+          </button>
+        </div>
+      )}
+
+      {/* ============================================================= */}
+      {/* TAB 2: UPDATE FOOD MENU (SUPER SIMPLE 2-FIELD FOOD FORM)      */}
+      {/* ============================================================= */}
+      {activeTab === 'menu' && (
+        <div className="p-4 sm:p-5 rounded-3xl bg-[#181818] border-2 border-zinc-700/80 border-b-6 border-b-zinc-900 space-y-4 shadow-xl">
+          {/* HEADER & EDIT/NEW STATUS */}
+          <div className="flex items-center justify-between border-b border-zinc-800/80 pb-2.5">
+            <h2 className="text-base sm:text-lg font-black text-white capitalize flex items-center gap-2">
+              <ChefHat className="w-5 h-5 text-amber-400" />
+              {hasExistingCustomMenu ? `Edit ${selectedMealType}` : `Set ${selectedMealType}`} ({selectedDay})
+            </h2>
+
+            {/* CORNER MORE OPTIONS LINK */}
+            <button
+              type="button"
+              onClick={() => setShowAdvancedOptions(!showAdvancedOptions)}
+              className="text-[11px] font-bold text-zinc-400 hover:text-amber-400 flex items-center gap-1 cursor-pointer transition-colors"
+            >
+              <Settings2 className="w-3.5 h-3.5" />
+              <span>More Options</span>
+              {showAdvancedOptions ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            </button>
+          </div>
+
+          {/* FEEDBACK ALERT */}
+          {menuFeedback && (
+            <div
+              className={`p-3 rounded-2xl text-xs font-bold flex items-center gap-2 ${
+                menuFeedback.type === 'success'
+                  ? 'bg-green-950/70 border border-green-800 text-green-300'
+                  : 'bg-red-950/70 border border-red-800 text-red-300'
+              }`}
+            >
+              <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+              <span>{menuFeedback.text}</span>
             </div>
           )}
 
-          <form onSubmit={handleSaveMenu} className="space-y-4">
+          {/* 1-TAP QUICK MEAL CHIPS (POHA, UPMA, VADA PAV / VEG THALI, NON-VEG THALI) */}
+          <div className="space-y-1.5">
+            <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">
+              💡 1-Tap Quick Meals (Tap to fill):
+            </span>
+            <div className="flex flex-wrap gap-1.5">
+              {selectedMealType === 'breakfast' && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => applyQuickMeal('Poha', '')}
+                    className="px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-amber-500/50 text-[11px] font-bold text-zinc-200 cursor-pointer"
+                  >
+                    🍚 Poha
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyQuickMeal('Upma', '')}
+                    className="px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-amber-500/50 text-[11px] font-bold text-zinc-200 cursor-pointer"
+                  >
+                    🥣 Upma
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyQuickMeal('Vada Pav', '')}
+                    className="px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-amber-500/50 text-[11px] font-bold text-zinc-200 cursor-pointer"
+                  >
+                    🍔 Vada Pav
+                  </button>
+                </>
+              )}
+
+              {(selectedMealType === 'lunch' || selectedMealType === 'dinner') && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => applyQuickMeal('Veg Thali', '')}
+                    className="px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-green-500/50 text-[11px] font-bold text-green-300 cursor-pointer flex items-center gap-1"
+                  >
+                    <span>🟢</span> Veg Thali
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyQuickMeal('Non-Veg Thali', '')}
+                    className="px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-red-500/50 text-[11px] font-bold text-red-300 cursor-pointer flex items-center gap-1"
+                  >
+                    <span>🔴</span> Non-Veg Thali
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* MAIN 2-FIELD FOOD FORM */}
+          <form onSubmit={handleSaveMenu} className="space-y-3.5">
+            {/* 1. MEAL NAME */}
             <div className="space-y-1">
-              <label className="block text-xs font-black uppercase tracking-wider text-zinc-400">
-                Menu Theme / Title
+              <label className="block text-xs font-black uppercase tracking-wider text-zinc-300">
+                Meal Name
               </label>
               <input
                 type="text"
                 value={menuTitle}
                 onChange={(e) => setMenuTitle(e.target.value)}
-                placeholder="e.g. Special Dum Biryani Night"
+                placeholder="e.g. Veg Thali / Poha"
                 required
-                className="w-full px-4 py-3.5 rounded-2xl bg-[#161616] border border-zinc-700 text-white font-bold placeholder-zinc-500 focus:outline-none focus:border-amber-500 transition-all text-sm"
+                className="w-full px-4 py-3 rounded-2xl bg-[#141414] border border-zinc-700 text-white font-bold text-sm focus:outline-none focus:border-amber-500"
               />
             </div>
 
+            {/* 2. DISHES DESCRIPTION (OPTIONAL) */}
             <div className="space-y-1">
-              <label className="block text-xs font-black uppercase tracking-wider text-zinc-400">
-                Food Items (Comma separated)
+              <label className="block text-xs font-black uppercase tracking-wider text-zinc-300">
+                Dishes in this Meal <span className="text-zinc-500 normal-case">(Optional)</span>
               </label>
               <textarea
                 value={menuItemsText}
                 onChange={(e) => setMenuItemsText(e.target.value)}
-                rows={3}
-                placeholder="Paneer Butter Masala, Dal Tadka, Butter Phulka, Jeera Rice, Gulab Jamun"
-                required
-                className="w-full px-4 py-3.5 rounded-2xl bg-[#161616] border border-zinc-700 text-white font-medium placeholder-zinc-500 focus:outline-none focus:border-amber-500 transition-all text-sm"
+                rows={2}
+                placeholder="Optional: e.g. Paneer Butter Masala, Roti, Rice"
+                className="w-full px-4 py-3 rounded-2xl bg-[#141414] border border-zinc-700 text-white font-medium text-sm focus:outline-none focus:border-amber-500 leading-relaxed"
               />
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <label className="block text-xs font-black uppercase tracking-wider text-zinc-400">
-                  Strict Cutoff Time (24h format)
-                </label>
-                <input
-                  type="time"
-                  value={menuCutoffHour}
-                  onChange={(e) => setMenuCutoffHour(e.target.value)}
-                  required
-                  className="w-full px-4 py-3.5 rounded-2xl bg-[#161616] border border-zinc-700 text-white font-bold focus:outline-none focus:border-amber-500 transition-all text-sm"
-                />
-              </div>
+            {/* ADVANCED TIMINGS & DEADLINE (UNDER MORE OPTIONS) */}
+            <AnimatePresence>
+              {showAdvancedOptions && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="p-3 rounded-2xl bg-zinc-900/80 border border-zinc-800 space-y-2.5 overflow-hidden"
+                >
+                  <div className="flex items-center justify-between text-xs font-bold text-amber-400">
+                    <span>⚙️ Custom Timings & Deadline</span>
+                  </div>
 
-              <div className="space-y-1">
-                <label className="block text-xs font-black uppercase tracking-wider text-zinc-400">
-                  Special Notes / Serving Timings
-                </label>
-                <input
-                  type="text"
-                  value={menuNotes}
-                  onChange={(e) => setMenuNotes(e.target.value)}
-                  placeholder="Dinner served from 8:00 PM to 10:00 PM"
-                  className="w-full px-4 py-3.5 rounded-2xl bg-[#161616] border border-zinc-700 text-white font-medium focus:outline-none focus:border-amber-500 transition-all text-sm"
-                />
-              </div>
-            </div>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="block text-[10px] font-black uppercase text-zinc-400">
+                        Cutoff Deadline
+                      </label>
+                      <input
+                        type="time"
+                        value={menuCutoffHour}
+                        onChange={(e) => setMenuCutoffHour(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl bg-[#141414] border border-zinc-700 text-white font-bold text-xs"
+                      />
+                    </div>
 
-            <div className="pt-3">
-              <TactileButton
+                    <div>
+                      <label className="block text-[10px] font-black uppercase text-zinc-400">
+                        Custom Note
+                      </label>
+                      <input
+                        type="text"
+                        value={menuNotes}
+                        onChange={(e) => setMenuNotes(e.target.value)}
+                        placeholder="Served hot from kitchen"
+                        className="w-full px-3 py-2 rounded-xl bg-[#141414] border border-zinc-700 text-white font-medium text-xs"
+                      />
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* ACTION BUTTONS (SAVE + DELETE/RESET) */}
+            <div className="pt-2 flex items-center gap-2">
+              <button
                 type="submit"
-                variant="orange"
-                size="lg"
-                fullWidth
-                rightIcon={<ChefHat className="w-5 h-5" />}
+                className="flex-1 py-3.5 px-4 rounded-2xl bg-amber-500 hover:bg-amber-400 text-black font-black text-sm border-b-4 border-b-amber-700 active:border-b-0 active:translate-y-1 flex items-center justify-center gap-2 cursor-pointer shadow-md transition-all"
               >
-                Save & Broadcast Menu
-              </TactileButton>
+                <ChefHat className="w-4 h-4" />
+                <span>{hasExistingCustomMenu ? 'Save Changes' : 'Publish Menu to Residents'}</span>
+              </button>
+
+              {hasExistingCustomMenu && (
+                <button
+                  type="button"
+                  onClick={handleDeleteMenu}
+                  className="py-3.5 px-4 rounded-2xl bg-[#281616] hover:bg-red-950 text-red-400 font-black text-sm border border-red-500/30 border-b-4 border-b-[#160c0c] active:border-b-0 active:translate-y-1 flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+                  title="Delete menu"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span>Delete</span>
+                </button>
+              )}
             </div>
           </form>
-        </TactileCard>
+        </div>
       )}
 
-      {/* TAB 3: RESIDENT WHITELIST DIRECTORY */}
+      {/* ============================================================= */}
+      {/* TAB 3: RESIDENTS (RIGHT TAB: REGISTER NEW PEOPLE)             */}
+      {/* ============================================================= */}
       {activeTab === 'residents' && (
-        <div className="space-y-6">
-          {/* ADD RESIDENT FORM */}
-          <TactileCard variant="elevated" className="p-7 space-y-4">
-            <h2 className="text-xl font-black text-white flex items-center gap-2">
+        <div className="space-y-4">
+          {/* BIG EASY ADD RESIDENT CARD */}
+          <div className="p-4 sm:p-5 rounded-3xl bg-[#181818] border-2 border-zinc-700/80 border-b-6 border-b-zinc-900 space-y-3.5 shadow-xl">
+            <div className="flex items-center gap-2 border-b border-zinc-800/80 pb-2.5">
               <UserPlus className="w-5 h-5 text-green-400" />
-              Add Resident to Whitelist
-            </h2>
-            <p className="text-xs text-zinc-400">
-              Only phone numbers added here will be permitted to log in via OTP.
-            </p>
+              <h2 className="text-base sm:text-lg font-black text-white">
+                Register New Resident
+              </h2>
+            </div>
 
             {residentAddSuccess && (
-              <div className="p-3 rounded-2xl bg-green-950/40 border border-green-800/60 text-xs text-green-300 flex items-center gap-2 font-bold">
-                <CheckCircle2 className="w-4 h-4 text-green-400" />
+              <div className="p-3 rounded-2xl bg-green-950/70 border border-green-800 text-xs text-green-300 font-bold flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-green-400 flex-shrink-0" />
                 <span>{residentAddSuccess}</span>
               </div>
             )}
 
             {residentAddError && (
-              <div className="p-3 rounded-2xl bg-red-950/40 border border-red-800/60 text-xs text-red-300 font-bold">
+              <div className="p-3 rounded-2xl bg-red-950/70 border border-red-800 text-xs text-red-300 font-bold">
                 {residentAddError}
               </div>
             )}
 
-            <form onSubmit={handleAddResident} className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <input
-                type="text"
-                value={newResidentName}
-                onChange={(e) => setNewResidentName(e.target.value)}
-                placeholder="Full Name (e.g. Sanya Gupta)"
-                required
-                className="px-4 py-3 rounded-2xl bg-[#161616] border border-zinc-700 text-white font-bold text-sm focus:outline-none focus:border-green-500"
-              />
+            <form onSubmit={handleAddResident} className="space-y-3">
+              {/* 1. Full Name */}
+              <div className="space-y-1">
+                <label className="block text-xs font-black uppercase tracking-wider text-zinc-300">
+                  Full Name
+                </label>
+                <input
+                  type="text"
+                  value={newResidentName}
+                  onChange={(e) => setNewResidentName(e.target.value)}
+                  placeholder="e.g. Rahul Sharma"
+                  required
+                  className="w-full px-4 py-3 rounded-2xl bg-[#141414] border border-zinc-700 text-white font-bold text-sm focus:outline-none focus:border-green-500"
+                />
+              </div>
 
-              <input
-                type="tel"
-                value={newResidentPhone}
-                onChange={(e) => setNewResidentPhone(e.target.value)}
-                placeholder="+91 9876543210"
-                required
-                className="px-4 py-3 rounded-2xl bg-[#161616] border border-zinc-700 text-white font-bold text-sm focus:outline-none focus:border-green-500"
-              />
+              {/* 2. Phone Number */}
+              <div className="space-y-1">
+                <label className="block text-xs font-black uppercase tracking-wider text-zinc-300">
+                  Mobile Number
+                </label>
+                <input
+                  type="tel"
+                  value={newResidentPhone}
+                  onChange={(e) => setNewResidentPhone(e.target.value)}
+                  placeholder="+91 9876543210"
+                  required
+                  className="w-full px-4 py-3 rounded-2xl bg-[#141414] border border-zinc-700 text-white font-bold text-sm focus:outline-none focus:border-green-500"
+                />
+              </div>
 
-              <div className="flex gap-2">
+              {/* 3. Room Number */}
+              <div className="space-y-1">
+                <label className="block text-xs font-black uppercase tracking-wider text-zinc-300">
+                  Room Number
+                </label>
                 <input
                   type="text"
                   value={newResidentRoom}
                   onChange={(e) => setNewResidentRoom(e.target.value)}
-                  placeholder="Room (e.g. 201-B)"
-                  className="w-28 px-3 py-3 rounded-2xl bg-[#161616] border border-zinc-700 text-white font-bold text-sm focus:outline-none focus:border-green-500"
+                  placeholder="e.g. Room 204"
+                  className="w-full px-4 py-3 rounded-2xl bg-[#141414] border border-zinc-700 text-white font-bold text-sm focus:outline-none focus:border-green-500"
                 />
-                <TactileButton
+              </div>
+
+              {/* Big Green Add Button */}
+              <div className="pt-1">
+                <button
                   type="submit"
-                  variant="green"
-                  size="md"
-                  className="flex-1"
-                  leftIcon={<Plus className="w-4 h-4 stroke-[3]" />}
+                  className="w-full py-3.5 px-4 rounded-2xl bg-green-500 hover:bg-green-400 text-black font-black text-sm border-b-4 border-b-green-700 active:border-b-0 active:translate-y-1 flex items-center justify-center gap-2 cursor-pointer shadow-md transition-all"
                 >
-                  Add
-                </TactileButton>
+                  <Plus className="w-4 h-4 stroke-[3]" />
+                  <span>Add Resident to PG</span>
+                </button>
               </div>
             </form>
-          </TactileCard>
+          </div>
 
-          {/* WHITELIST DIRECTORY LIST */}
-          <TactileCard variant="default" className="p-6 space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <h3 className="text-base font-black text-white flex items-center gap-2">
-                <Users className="w-4 h-4 text-green-400" />
-                Authorized Whitelist ({profiles.length})
-              </h3>
-
-              <div className="relative">
-                <Search className="w-4 h-4 absolute left-3.5 top-3 text-zinc-500" />
-                <input
-                  type="text"
-                  value={residentSearchQuery}
-                  onChange={(e) => setResidentSearchQuery(e.target.value)}
-                  placeholder="Search name or room..."
-                  className="pl-9 pr-4 py-2 rounded-full bg-[#141414] border border-zinc-700 text-xs text-white focus:outline-none focus:border-green-500 w-full sm:w-56"
-                />
+          {/* VIEW REGISTERED RESIDENTS (COLLAPSED UNDER ONE BUTTON) */}
+          <div className="space-y-2">
+            <button
+              type="button"
+              onClick={() => setShowAdvancedOptions(!showAdvancedOptions)}
+              className="w-full py-3 px-4 rounded-2xl bg-[#181818] border border-zinc-800 hover:border-zinc-700 text-zinc-300 font-bold text-xs flex items-center justify-between cursor-pointer transition-all shadow-sm"
+            >
+              <div className="flex items-center gap-2">
+                <Users className="w-4 h-4 text-amber-400" />
+                <span>View Registered Residents ({profiles.length})</span>
               </div>
-            </div>
+              {showAdvancedOptions ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+            </button>
 
-            <div className="divide-y divide-zinc-800/80">
-              {profiles
-                .filter((p) =>
-                  p.name.toLowerCase().includes(residentSearchQuery.toLowerCase()) ||
-                  (p.room_number || '').toLowerCase().includes(residentSearchQuery.toLowerCase()) ||
-                  p.phone_number.includes(residentSearchQuery)
-                )
-                .map((profile) => (
-                  <div key={profile.id} className="py-3.5 flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-black ${
-                        profile.role === 'admin' ? 'bg-amber-500 text-black' : 'bg-green-500 text-black'
-                      }`}>
-                        {profile.name.charAt(0)}
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <p className="text-sm font-bold text-white leading-tight">{profile.name}</p>
-                          <span className={`text-[10px] font-black uppercase px-2 py-0.2 rounded-full ${
-                            profile.role === 'admin' ? 'bg-amber-500/20 text-amber-300' : 'bg-zinc-800 text-zinc-300'
-                          }`}>
-                            {profile.role}
-                          </span>
-                        </div>
-                        <p className="text-xs text-zinc-400">
-                          {profile.phone_number} • Room: <span className="text-zinc-300 font-bold">{profile.room_number || 'N/A'}</span>
-                        </p>
-                      </div>
-                    </div>
-
-                    {profile.role !== 'admin' && (
-                      <button
-                        onClick={() => handleRemoveResident(profile.id, profile.name)}
-                        className="p-2 rounded-full text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                        title="Remove from whitelist"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    )}
+            {/* EXPANDABLE RESIDENT DIRECTORY LIST */}
+            <AnimatePresence>
+              {showAdvancedOptions && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="p-4 rounded-3xl bg-[#181818] border border-zinc-800 space-y-3 overflow-hidden shadow-xl"
+                >
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 absolute left-3 top-3 text-zinc-500" />
+                    <input
+                      type="text"
+                      value={residentSearchQuery}
+                      onChange={(e) => setResidentSearchQuery(e.target.value)}
+                      placeholder="Search resident name or room..."
+                      className="w-full pl-8 pr-3 py-2 rounded-2xl bg-[#141414] border border-zinc-700 text-xs text-white focus:outline-none focus:border-green-500"
+                    />
                   </div>
-                ))}
-            </div>
-          </TactileCard>
+
+                  <div className="divide-y divide-zinc-850 max-h-64 overflow-y-auto pr-1">
+                    {profiles
+                      .filter(
+                        (p) =>
+                          p.name.toLowerCase().includes(residentSearchQuery.toLowerCase()) ||
+                          (p.room_number || '').toLowerCase().includes(residentSearchQuery.toLowerCase()) ||
+                          p.phone_number.includes(residentSearchQuery)
+                      )
+                      .map((profile) => (
+                        <div key={profile.id} className="py-2.5 flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2.5">
+                            <div
+                              className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-black ${
+                                profile.role === 'admin'
+                                  ? 'bg-amber-500 text-black'
+                                  : 'bg-green-500 text-black'
+                              }`}
+                            >
+                              {profile.name.charAt(0)}
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-1.5">
+                                <p className="text-xs sm:text-sm font-bold text-white leading-tight">{profile.name}</p>
+                                <span
+                                  className={`text-[8px] font-black uppercase px-1.5 py-0.2 rounded ${
+                                    profile.role === 'admin'
+                                      ? 'bg-amber-500/20 text-amber-300'
+                                      : 'bg-zinc-800 text-zinc-400'
+                                  }`}
+                                >
+                                  {profile.role}
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-zinc-500">
+                                Room <span className="text-zinc-300 font-bold">{profile.room_number || 'N/A'}</span> • {profile.phone_number}
+                              </p>
+                            </div>
+                          </div>
+
+                          {profile.role !== 'admin' && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveResident(profile.id, profile.name)}
+                              className="p-2 rounded-xl text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer"
+                              title="Remove resident"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
         </div>
       )}
+
+      {/* ============================================================= */}
+      {/* INSTAGRAM-STYLE 3-SECTION BOTTOM NAVIGATION BAR               */}
+      {/* 1. Count (Headcount) | 2. Middle + Add Meal | 3. Residents   */}
+      {/* ============================================================= */}
+      <nav className="fixed bottom-0 left-0 right-0 z-40 bg-[#121212]/95 backdrop-blur-xl border-t border-zinc-800/90 shadow-[0_-8px_30px_rgba(0,0,0,0.8)]">
+        <div className="max-w-md mx-auto px-4 py-2 flex items-center justify-around relative">
+          {/* TAB 1 (LEFT): HEADCOUNT / PLATES COUNT */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('headcount')}
+            className={`flex flex-col items-center gap-1 py-1 px-4 rounded-2xl transition-all cursor-pointer ${
+              activeTab === 'headcount'
+                ? 'text-amber-400 scale-105'
+                : 'text-zinc-500 hover:text-zinc-300'
+            }`}
+          >
+            <div className="relative">
+              <Utensils className={`w-5 h-5 ${activeTab === 'headcount' ? 'stroke-[2.8]' : 'stroke-2'}`} />
+              <span className="absolute -top-1 -right-2 w-4 h-4 rounded-full bg-green-500 text-black text-[9px] font-black flex items-center justify-center">
+                {headcount.eating}
+              </span>
+            </div>
+            <span className="text-[10px] font-black tracking-tight">Count</span>
+          </button>
+
+          {/* TAB 2 (MIDDLE): ELEVATED INSTAGRAM-STYLE ADD MEALS BUTTON */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('menu')}
+            aria-label="Add or edit meal menu"
+            className={`
+              -mt-5 w-14 h-14 rounded-full flex flex-col items-center justify-center gap-0.5
+              transition-all duration-150 transform cursor-pointer shadow-[0_6px_20px_rgba(245,158,11,0.35)]
+              ${
+                activeTab === 'menu'
+                  ? 'bg-amber-400 text-black scale-110 border-4 border-black ring-4 ring-amber-500/40'
+                  : 'bg-amber-500 hover:bg-amber-400 text-black border-4 border-black active:scale-95'
+              }
+            `}
+          >
+            <Plus className="w-6 h-6 stroke-[3.5]" />
+          </button>
+
+          {/* TAB 3 (RIGHT): REGISTER RESIDENTS */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('residents')}
+            className={`flex flex-col items-center gap-1 py-1 px-4 rounded-2xl transition-all cursor-pointer ${
+              activeTab === 'residents'
+                ? 'text-amber-400 scale-105'
+                : 'text-zinc-500 hover:text-zinc-300'
+            }`}
+          >
+            <div className="relative">
+              <UserPlus className={`w-5 h-5 ${activeTab === 'residents' ? 'stroke-[2.8]' : 'stroke-2'}`} />
+              <span className="absolute -top-1 -right-2 w-4 h-4 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-300 text-[9px] font-bold flex items-center justify-center">
+                {activeResidents.length}
+              </span>
+            </div>
+            <span className="text-[10px] font-black tracking-tight">Residents</span>
+          </button>
+        </div>
+      </nav>
     </div>
   );
 }

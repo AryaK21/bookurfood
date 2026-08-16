@@ -1,65 +1,15 @@
 import { createClient } from '@/lib/supabase/client';
-import type { Profile, Menu, Booking, BookingStatus, UserRole, MenuItem } from '@/types/database.types';
+import type { Profile, Menu, Booking, BookingStatus, UserRole, MenuItem, MealType } from '@/types/database.types';
 
 // Default mock state for immediate offline/preview testing if Supabase is unconfigured
 const INITIAL_PROFILES: Profile[] = [
   {
     id: '00000000-0000-0000-0000-000000000001',
-    user_id: 'user-admin-01',
+    user_id: 'admin-01',
     phone_number: '+919876543210',
-    name: 'Manager Rao',
+    name: 'Admin Manager',
     room_number: 'Office',
     role: 'admin',
-    is_active: true,
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: '00000000-0000-0000-0000-000000000002',
-    user_id: 'user-res-01',
-    phone_number: '+919876543211',
-    name: 'Aarav Sharma',
-    room_number: '204-A',
-    role: 'resident',
-    is_active: true,
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: '00000000-0000-0000-0000-000000000003',
-    user_id: 'user-res-02',
-    phone_number: '+919876543212',
-    name: 'Rohan Verma',
-    room_number: '108-B',
-    role: 'resident',
-    is_active: true,
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: '00000000-0000-0000-0000-000000000004',
-    user_id: 'user-res-03',
-    phone_number: '+919876543213',
-    name: 'Ananya Iyer',
-    room_number: '312-A',
-    role: 'resident',
-    is_active: true,
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: '00000000-0000-0000-0000-000000000005',
-    user_id: 'user-res-04',
-    phone_number: '+919876543214',
-    name: 'Vikram Patel',
-    room_number: '105-C',
-    role: 'resident',
-    is_active: true,
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: '00000000-0000-0000-0000-000000000006',
-    user_id: 'user-res-05',
-    phone_number: '+919876543215',
-    name: 'Priya Nair',
-    room_number: '210-B',
-    role: 'resident',
     is_active: true,
     created_at: new Date().toISOString(),
   },
@@ -70,93 +20,74 @@ const getTodayDateString = () => {
   return d.toISOString().split('T')[0];
 };
 
-const getIsoTimeForToday = (hours: number, minutes: number) => {
+export const MEAL_SCHEDULES: Record<MealType, {
+  name: string;
+  servingTime: string;
+  servingStart: string;
+  servingEnd: string;
+  cutoffTime: string;
+  cutoffHour: number;
+  cutoffMinute: number;
+  optimalNotificationTime: string;
+  iconName: 'Sun' | 'SunMedium' | 'Moon';
+}> = {
+  breakfast: {
+    name: 'Breakfast',
+    servingTime: '8:00 AM - 10:30 AM',
+    servingStart: '08:00',
+    servingEnd: '10:30',
+    cutoffTime: '7:00 AM',
+    cutoffHour: 7,
+    cutoffMinute: 0,
+    optimalNotificationTime: '6:00 AM (or 9:00 PM night before)',
+    iconName: 'SunMedium',
+  },
+  lunch: {
+    name: 'Lunch',
+    servingTime: '12:30 PM - 2:00 PM',
+    servingStart: '12:30',
+    servingEnd: '14:00',
+    cutoffTime: '11:30 AM',
+    cutoffHour: 11,
+    cutoffMinute: 30,
+    optimalNotificationTime: '10:00 AM',
+    iconName: 'Sun',
+  },
+  dinner: {
+    name: 'Dinner',
+    servingTime: '7:30 PM - 9:30 PM',
+    servingStart: '19:30',
+    servingEnd: '21:30',
+    cutoffTime: '6:30 PM',
+    cutoffHour: 18,
+    cutoffMinute: 30,
+    optimalNotificationTime: '5:00 PM',
+    iconName: 'Moon',
+  },
+};
+
+const getTomorrowDateString = () => {
   const d = new Date();
+  d.setDate(d.getDate() + 1);
+  return d.toISOString().split('T')[0];
+};
+
+const getIsoTimeForDate = (dateOffsetDays: number, hours: number, minutes: number) => {
+  const d = new Date();
+  d.setDate(d.getDate() + dateOffsetDays);
   d.setHours(hours, minutes, 0, 0);
   return d.toISOString();
 };
 
-const INITIAL_MENUS: Menu[] = [
-  {
-    id: '11111111-1111-1111-1111-111111111111',
-    date: getTodayDateString(),
-    meal_type: 'lunch',
-    title: 'North Indian Thali Feast',
-    items: [
-      { id: '1', name: 'Paneer Butter Masala', category: 'curry', is_veg: true },
-      { id: '2', name: 'Dal Tadka Special', category: 'curry', is_veg: true },
-      { id: '3', name: 'Butter Phulka (3 pcs)', category: 'bread', is_veg: true },
-      { id: '4', name: 'Jeera Rice & Pickle', category: 'rice', is_veg: true },
-      { id: '5', name: 'Boondi Raita & Salad', category: 'side', is_veg: true },
-      { id: '6', name: 'Warm Gulab Jamun (2 pcs)', category: 'dessert', is_veg: true },
-    ],
-    cutoff_time: getIsoTimeForToday(11, 30),
-    is_published: true,
-    notes: 'Hot lunch served fresh from 12:30 PM - 2:30 PM.',
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: '22222222-2222-2222-2222-222222222222',
-    date: getTodayDateString(),
-    meal_type: 'dinner',
-    title: 'Special Dum Biryani Night',
-    items: [
-      { id: '7', name: 'Hyderabadi Dum Biryani (Chicken/Paneer)', category: 'main', is_veg: false },
-      { id: '8', name: 'Mirchi Ka Salan (Rich Gravy)', category: 'curry', is_veg: true },
-      { id: '9', name: 'Crisp Onion & Cucumber Raita', category: 'side', is_veg: true },
-      { id: '10', name: 'Double Ka Meetha', category: 'dessert', is_veg: true },
-    ],
-    cutoff_time: getIsoTimeForToday(17, 0), // 5:00 PM cutoff
-    is_published: true,
-    notes: 'Dinner served hot from 8:00 PM - 10:00 PM. Cutoff strictly at 5:00 PM.',
-    created_at: new Date().toISOString(),
-  },
-];
+const INITIAL_MENUS: Menu[] = [];
 
-const INITIAL_BOOKINGS: Booking[] = [
-  {
-    id: 'b1',
-    menu_id: '22222222-2222-2222-2222-222222222222',
-    profile_id: '00000000-0000-0000-0000-000000000002',
-    status: 'eating',
-    notes: null,
-    updated_at: new Date().toISOString(),
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: 'b2',
-    menu_id: '22222222-2222-2222-2222-222222222222',
-    profile_id: '00000000-0000-0000-0000-000000000003',
-    status: 'eating',
-    notes: null,
-    updated_at: new Date().toISOString(),
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: 'b3',
-    menu_id: '22222222-2222-2222-2222-222222222222',
-    profile_id: '00000000-0000-0000-0000-000000000004',
-    status: 'skipping',
-    notes: null,
-    updated_at: new Date().toISOString(),
-    created_at: new Date().toISOString(),
-  },
-  {
-    id: 'b4',
-    menu_id: '22222222-2222-2222-2222-222222222222',
-    profile_id: '00000000-0000-0000-0000-000000000005',
-    status: 'eating',
-    notes: null,
-    updated_at: new Date().toISOString(),
-    created_at: new Date().toISOString(),
-  },
-];
+const INITIAL_BOOKINGS: Booking[] = [];
 
 const STORAGE_KEYS = {
-  PROFILES: 'foodbook_profiles_v1',
-  MENUS: 'foodbook_menus_v1',
-  BOOKINGS: 'foodbook_bookings_v1',
-  SESSION: 'foodbook_current_user_v1',
+  PROFILES: 'foodbook_profiles_prod_v1',
+  MENUS: 'foodbook_menus_prod_v1',
+  BOOKINGS: 'foodbook_bookings_prod_v1',
+  SESSION: 'foodbook_session_user_prod_v1',
 };
 
 export const isSupabaseConfigured = () => {
@@ -321,25 +252,62 @@ export class DataStore {
     localStorage.setItem(STORAGE_KEYS.MENUS, JSON.stringify(menus));
   }
 
+  static getMealsForDate(dateStr: string): Menu[] {
+    const allMenus = this.getMenus();
+    const mealTypes: MealType[] = ['breakfast', 'lunch', 'dinner'];
+
+    return mealTypes.map((mealType) => {
+      const existing = allMenus.find((m) => m.date === dateStr && m.meal_type === mealType);
+      if (existing) {
+        return existing;
+      }
+
+      const schedule = MEAL_SCHEDULES[mealType];
+      const [y, m, d] = dateStr.split('-').map(Number);
+      const cutoffDate = new Date(y, m - 1, d, schedule.cutoffHour, schedule.cutoffMinute, 0);
+
+      return {
+        id: `unconfigured-${dateStr}-${mealType}`,
+        date: dateStr,
+        meal_type: mealType,
+        title: 'Menu not added yet',
+        items: [],
+        cutoff_time: cutoffDate.toISOString(),
+        serving_start: schedule.servingStart,
+        serving_end: schedule.servingEnd,
+        is_published: false,
+        notes: 'The kitchen will post today\'s dishes shortly. You can still confirm your attendance!',
+        created_at: new Date().toISOString(),
+      };
+    });
+  }
+
   static async saveMenu(menuData: {
     id?: string;
     date: string;
-    meal_type: 'lunch' | 'dinner';
+    meal_type: MealType;
     title: string;
     items: MenuItem[];
     cutoff_time: string;
+    serving_start?: string;
+    serving_end?: string;
     notes?: string | null;
     is_published?: boolean;
   }): Promise<Menu> {
+    const isPlaceholderId = menuData.id?.startsWith('unconfigured-');
+    const effectiveId = isPlaceholderId ? crypto.randomUUID() : (menuData.id || crypto.randomUUID());
+
     if (isSupabaseConfigured()) {
       const supabase = createClient();
       const upsertPayload: any = {
-        ...(menuData.id ? { id: menuData.id } : {}),
+        id: effectiveId,
         date: menuData.date,
         meal_type: menuData.meal_type,
         title: menuData.title,
         items: menuData.items,
         cutoff_time: menuData.cutoff_time,
+        serving_start: menuData.serving_start || null,
+        serving_end: menuData.serving_end || null,
         is_published: menuData.is_published ?? true,
         notes: menuData.notes ?? null,
       };
@@ -363,18 +331,22 @@ export class DataStore {
         title: menuData.title,
         items: menuData.items,
         cutoff_time: menuData.cutoff_time,
+        serving_start: menuData.serving_start ?? menus[index].serving_start,
+        serving_end: menuData.serving_end ?? menus[index].serving_end,
         notes: menuData.notes ?? null,
         is_published: menuData.is_published ?? true,
       };
       menus[index] = updatedMenu;
     } else {
       updatedMenu = {
-        id: menuData.id || crypto.randomUUID(),
+        id: effectiveId,
         date: menuData.date,
         meal_type: menuData.meal_type,
         title: menuData.title,
         items: menuData.items,
         cutoff_time: menuData.cutoff_time,
+        serving_start: menuData.serving_start || '08:00',
+        serving_end: menuData.serving_end || '10:30',
         is_published: menuData.is_published ?? true,
         notes: menuData.notes ?? null,
         created_at: new Date().toISOString(),
@@ -382,8 +354,35 @@ export class DataStore {
       menus.unshift(updatedMenu);
     }
 
+    // Migrate any placeholder bookings to the new menu ID
+    if (isPlaceholderId && menuData.id) {
+      const bookings = this.getBookings();
+      const updatedBookings = bookings.map((b) =>
+        b.menu_id === menuData.id ? { ...b, menu_id: updatedMenu.id } : b
+      );
+      this.saveBookings(updatedBookings);
+    }
+
     this.saveMenus(menus);
     return updatedMenu;
+  }
+
+  static async deleteMenu(date: string, mealType: MealType): Promise<void> {
+    if (isSupabaseConfigured()) {
+      const supabase = createClient();
+      const { error } = await supabase
+        .from('menus')
+        .delete()
+        .eq('date', date)
+        .eq('meal_type', mealType);
+      if (error) throw error;
+      return;
+    }
+
+    const menus = this.getMenus().filter(
+      (m) => !(m.date === date && m.meal_type === mealType)
+    );
+    this.saveMenus(menus);
   }
 
   // -------------------------------------------------------------
@@ -449,6 +448,51 @@ export class DataStore {
 
     this.saveBookings(bookings);
     return resultBooking;
+  }
+
+  // Quick toggle helper for Service Worker background fetch or direct API
+  static async quickToggleBooking({
+    menuId,
+    profileId,
+    phone,
+    status,
+  }: {
+    menuId?: string;
+    profileId?: string;
+    phone?: string;
+    status: BookingStatus;
+  }): Promise<{ success: boolean; booking?: Booking; menu?: Menu; profile?: Profile; error?: string }> {
+    const menus = this.getMenus();
+    let targetMenu = menuId ? menus.find((m) => m.id === menuId) : undefined;
+
+    // If no menuId specified, find current or next upcoming meal
+    if (!targetMenu) {
+      const now = new Date().getTime();
+      targetMenu = menus.find((m) => new Date(m.cutoff_time).getTime() > now) || menus[0];
+    }
+
+    if (!targetMenu) {
+      return { success: false, error: 'No active meal menu found.' };
+    }
+
+    // Resolve profile
+    const profiles = this.getProfiles();
+    let targetProfile = profileId ? profiles.find((p) => p.id === profileId) : undefined;
+    if (!targetProfile && phone) {
+      const cleanPhone = phone.replace(/\s+/g, '');
+      targetProfile = profiles.find((p) => p.phone_number === cleanPhone || p.phone_number.slice(-10) === cleanPhone.slice(-10));
+    }
+    if (!targetProfile) {
+      // Default to first active resident if testing offline
+      targetProfile = profiles.find((p) => p.role === 'resident' && p.is_active);
+    }
+
+    if (!targetProfile) {
+      return { success: false, error: 'Resident profile not identified.' };
+    }
+
+    const booking = await this.toggleBooking(targetMenu.id, targetProfile.id, status);
+    return { success: true, booking, menu: targetMenu, profile: targetProfile };
   }
 
   // Headcount calculation helper

@@ -1,15 +1,29 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { TactileButton } from '@/components/ui/TactileButton';
-import { Bell, BellRing, CheckCircle2, Sparkles, Send } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { useAuth } from '@/lib/auth/auth-context';
+import type { MealType } from '@/types/database.types';
+import {
+  Bell,
+  BellRing,
+  CheckCircle2,
+  Send,
+  Coffee,
+  Sun,
+  Moon,
+  Zap,
+  ChevronDown,
+  ChevronUp,
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 
 export function PushNotificationPrompt() {
+  const { user } = useAuth();
   const [permission, setPermission] = useState<NotificationPermission>('default');
   const [isSubscribed, setIsSubscribed] = useState(false);
-  const [isSending, setIsSending] = useState(false);
+  const [isSending, setIsSending] = useState<string | null>(null);
   const [feedback, setFeedback] = useState('');
+  const [isExpanded, setIsExpanded] = useState(false);
 
   useEffect(() => {
     if (typeof window !== 'undefined' && 'Notification' in window) {
@@ -24,6 +38,7 @@ export function PushNotificationPrompt() {
     if ('serviceWorker' in navigator) {
       try {
         const registration = await navigator.serviceWorker.register('/sw-push.js');
+        await navigator.serviceWorker.ready;
         return registration;
       } catch (err) {
         console.error('Service worker registration failed:', err);
@@ -34,7 +49,7 @@ export function PushNotificationPrompt() {
 
   const handleSubscribe = async () => {
     if (!('Notification' in window)) {
-      alert('This browser does not support desktop notifications');
+      alert('This browser does not support desktop/mobile notifications.');
       return;
     }
 
@@ -44,97 +59,129 @@ export function PushNotificationPrompt() {
 
     if (result === 'granted') {
       setIsSubscribed(true);
-      setFeedback('Notifications enabled! You will be reminded daily before cutoff.');
+      setFeedback('1-Tap Notifications enabled! Tap ✅ or ❌ directly inside alerts.');
 
       if (reg) {
-        reg.showNotification("FoodBook Reminders Active! 🔔", {
-          body: "You'll receive a daily reminder at 3:00 PM to book tonight's dinner.",
+        reg.showNotification("FoodBook 1-Tap Reminders Active! 🔔", {
+          body: "You'll receive 1-tap alerts before Breakfast (7:00 AM), Lunch (11:30 AM), and Dinner (6:30 PM) deadlines.",
           icon: '/icons/icon-192x192.png',
+          badge: '/icons/favicon.png',
         });
       }
     }
   };
 
-  const handleSendTestPush = async () => {
-    setIsSending(true);
+  // Dispatch simulated push notification with 1-tap ✅ and ❌ buttons
+  const handleSendTestPush = async (meal: MealType) => {
+    setIsSending(meal);
     setFeedback('');
 
+    const mealConfig = {
+      breakfast: {
+        title: "Breakfast 🍳",
+        body: "South Indian Idli & Vada",
+        menuTitle: "Idli & Vada",
+      },
+      lunch: {
+        title: "Lunch 🍛",
+        body: "North Indian Veg Thali",
+        menuTitle: "Veg Thali",
+      },
+      dinner: {
+        title: "Dinner 🍲",
+        body: "Special Dum Biryani Feast",
+        menuTitle: "Dum Biryani",
+      },
+    }[meal];
+
     if (Notification.permission === 'granted') {
-      if ('serviceWorker' in navigator) {
-        const reg = await navigator.serviceWorker.ready;
-        reg.showNotification("Tap to book tonight's dinner! 🍛", {
-          body: "Special Dum Biryani is on the menu! Lock in before 5:00 PM cutoff.",
-          icon: '/icons/icon-192x192.png',
-          badge: '/icons/favicon.png',
-          vibrate: [150, 50, 150],
-        } as any);
-      } else {
-        new Notification("Tap to book tonight's dinner! 🍛", {
-          body: "Special Dum Biryani is on the menu! Lock in before 5:00 PM cutoff.",
-          icon: '/icons/icon-192x192.png',
-        } as any);
+      try {
+        const reg = await registerServiceWorker();
+        if (reg) {
+          await reg.showNotification(mealConfig.title, {
+            body: mealConfig.body,
+            icon: '/icons/icon-192x192.png',
+            badge: '/icons/favicon.png',
+            vibrate: [150, 50, 150],
+            tag: `foodbook-test-${meal}`,
+            renotify: true,
+            data: {
+              url: `/?meal=${meal}`,
+              mealType: meal,
+              profileId: user?.id,
+              phone: user?.phone_number,
+              menuTitle: mealConfig.menuTitle,
+            },
+            actions: [
+              {
+                action: 'eating',
+                title: "✅ Yes (I'll Eat)",
+              },
+              {
+                action: 'skipping',
+                title: "❌ No (Skip)",
+              },
+            ],
+          } as any);
+
+          setFeedback(
+            `Simulated ${meal.toUpperCase()} alert sent! Check your notification tray to tap ✅ or ❌.`
+          );
+        }
+      } catch (err: any) {
+        console.error('Test notification trigger error:', err);
+        setFeedback('Failed to deliver test notification: ' + err.message);
       }
-      setFeedback('Simulated 3:00 PM push alert triggered!');
     } else {
       await handleSubscribe();
     }
-    setIsSending(false);
+    setIsSending(null);
   };
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="rounded-3xl p-5 bg-[#171717] border border-zinc-800/80 space-y-3.5"
-    >
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center border border-amber-500/30">
-            <BellRing className="w-5 h-5" />
+    <div className="rounded-2xl p-3.5 bg-[#171717] border border-zinc-800 space-y-2.5 text-xs">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center border border-amber-500/30 flex-shrink-0">
+            <Zap className="w-4 h-4" />
           </div>
           <div>
-            <h4 className="text-sm font-black text-white">Daily Meal Reminders</h4>
-            <p className="text-xs text-zinc-400">
-              Get an alert at 3:00 PM: &ldquo;Tap to book tonight&apos;s dinner! 🍛&rdquo;
+            <div className="flex items-center gap-1.5">
+              <span className="font-black text-white">1-Tap Notification Alerts</span>
+              <span className="text-[9px] font-black uppercase px-1.5 py-0.2 rounded bg-green-500/20 text-green-300">
+                Zero-Friction
+              </span>
+            </div>
+            <p className="text-[11px] text-zinc-400">
+              Confirm with <span className="text-green-400 font-bold">✅ Yes</span> or <span className="text-red-400 font-bold">❌ No</span> directly in alerts
             </p>
           </div>
+        </div>
+
+        <div className="flex items-center gap-1.5">
+          {permission !== 'granted' ? (
+            <button
+              type="button"
+              onClick={handleSubscribe}
+              className="px-3 py-1.5 rounded-xl bg-green-500 hover:bg-green-400 text-black font-black text-xs border-b-2 border-b-green-700 cursor-pointer"
+            >
+              Enable
+            </button>
+          ) : (
+            <span className="px-2.5 py-1 rounded-xl bg-green-950/60 border border-green-800 text-green-300 font-bold text-[11px] flex items-center gap-1">
+              <CheckCircle2 className="w-3 h-3 text-green-400" />
+              <span>Active</span>
+            </span>
+          )}
         </div>
       </div>
 
       {feedback && (
-        <div className="p-2.5 rounded-xl bg-green-950/40 border border-green-800/50 text-xs text-green-300 flex items-center gap-2 font-bold">
-          <CheckCircle2 className="w-4 h-4 text-green-400 flex-shrink-0" />
+        <div className="p-2 rounded-xl bg-green-950/40 border border-green-800/50 text-[11px] text-green-300 flex items-center gap-1.5 font-bold">
+          <CheckCircle2 className="w-3.5 h-3.5 text-green-400 flex-shrink-0" />
           <span>{feedback}</span>
         </div>
       )}
-
-      <div className="flex flex-wrap items-center gap-2 pt-1">
-        {permission !== 'granted' ? (
-          <TactileButton
-            variant="green"
-            size="sm"
-            onClick={handleSubscribe}
-            leftIcon={<Bell className="w-4 h-4" />}
-          >
-            Enable Web Push Alerts
-          </TactileButton>
-        ) : (
-          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-green-500/15 text-green-400 border border-green-500/30 text-xs font-bold">
-            <CheckCircle2 className="w-3.5 h-3.5" />
-            Push Notifications Active
-          </span>
-        )}
-
-        <TactileButton
-          variant="neutral"
-          size="sm"
-          onClick={handleSendTestPush}
-          isLoading={isSending}
-          leftIcon={<Send className="w-3.5 h-3.5 text-amber-400" />}
-        >
-          Test 3 PM Reminder
-        </TactileButton>
-      </div>
-    </motion.div>
+    </div>
   );
 }

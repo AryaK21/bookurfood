@@ -4,10 +4,10 @@ import React from 'react';
 import { useAuth } from '@/lib/auth/auth-context';
 import { Navbar } from '@/components/ui/Navbar';
 import { ResidentMealView } from '@/components/resident/ResidentMealView';
-import { PushNotificationPrompt } from '@/components/pwa/PushNotificationPrompt';
 import { LoginForm } from '@/components/auth/LoginForm';
-import { Sparkles, Utensils, Shield } from 'lucide-react';
-import Link from 'next/link';
+import { Utensils } from 'lucide-react';
+
+import { AdminDashboard } from '@/components/admin/AdminDashboard';
 
 export default function HomePage() {
   const { user, isAuthenticated, isLoading, isAdmin } = useAuth();
@@ -29,40 +29,45 @@ export default function HomePage() {
     <div className="min-h-screen flex flex-col justify-between bg-[#121212]">
       <Navbar />
 
-      <main className="flex-1 px-4 sm:px-6 py-6 sm:py-8 max-w-2xl mx-auto w-full space-y-6">
+      <main className="flex-1 px-3.5 sm:px-6 py-3 sm:py-5 max-w-2xl mx-auto w-full space-y-3.5 sm:space-y-4 flex flex-col justify-center">
         {isAuthenticated && user ? (
-          <>
-            {/* Welcome Resident Banner */}
-            <div className="flex items-center justify-between px-1">
-              <div>
-                <p className="text-xs font-bold text-zinc-400">Welcome back,</p>
-                <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
-                  {user.name} 👋
-                </h1>
+          isAdmin ? (
+            /* DIRECT ADMIN DASHBOARD VIEW FOR ADMIN ACCOUNT */
+            <AdminDashboard />
+          ) : (
+            /* RESIDENT VIEW */
+            <>
+              {/* Welcome Resident Mini Bar */}
+              <div className="flex items-center justify-between px-1">
+                <div>
+                  <p className="text-[11px] font-bold text-zinc-400">Welcome back,</p>
+                  <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+                    {user.name} 👋
+                  </h1>
+                </div>
+                <div className="text-right">
+                  <span className="inline-block text-[11px] font-black uppercase px-2.5 py-1 rounded-full bg-[#1e1e1e] border border-zinc-800 text-green-400">
+                    Room {user.room_number || 'Resident'}
+                  </span>
+                </div>
               </div>
-              <div className="text-right">
-                <span className="inline-block text-xs font-black uppercase px-3 py-1 rounded-full bg-[#1e1e1e] border border-zinc-800 text-green-400">
-                  Room {user.room_number || 'Resident'}
-                </span>
-              </div>
-            </div>
 
-            {/* Resident Meal Booking Interface */}
-            <ResidentMealView />
-
-            {/* Daily Web Push Notifications Banner */}
-            <PushNotificationPrompt />
-          </>
+              {/* Resident Square Cards Meal Booking Interface */}
+              <ResidentMealView />
+            </>
+          )
         ) : (
-          <div className="py-4">
+          <div className="py-2">
             <LoginForm />
           </div>
         )}
       </main>
 
-      <footer className="text-center py-6 border-t border-zinc-900 text-xs text-zinc-600 font-medium">
-        FoodBook • PG Canteen Meal Booking System • PWA
-      </footer>
+      {!isAdmin && (
+        <footer className="text-center py-2.5 border-t border-zinc-900/80 text-[11px] text-zinc-600 font-medium">
+          FoodBook • PG Canteen Meal Booking System • PWA
+        </footer>
+      )}
     </div>
   );
 }

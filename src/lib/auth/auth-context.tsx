@@ -20,7 +20,7 @@ interface AuthState {
 
 const AuthContext = createContext<AuthState | undefined>(undefined);
 
-const CURRENT_USER_KEY = 'foodbook_session_user';
+const CURRENT_USER_KEY = 'foodbook_session_user_prod_v1';
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<Profile | null>(null);
