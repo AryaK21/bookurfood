@@ -37,11 +37,14 @@ export async function registerPushNotifications(profileId?: string, phone?: stri
       return { success: false, permission, error: 'Notification permission was denied or dismissed.' };
     }
 
-    // 2. Register Service Worker with push capability
-    const registration = await navigator.serviceWorker.register('/sw-push.js');
+    // 2. Register Service Worker and wait until active
+    let registration = await navigator.serviceWorker.getRegistration();
+    if (!registration) {
+      registration = await navigator.serviceWorker.register('/sw-push.js');
+    }
     await navigator.serviceWorker.ready;
 
-    // 3. Subscribe to Web Push Manager
+    // 3. Subscribe to Web Push Manager with VAPID Public Key
     const vapidKey =
       process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ||
       'BNG537UsV9LSw6rsxzYHNX4gzkSA4HEZOBgXS6z12R_wlbXtUW6rtCp2l9Vxr43egBUsDXYkobb8ttizRU8SqaA';
@@ -56,28 +59,46 @@ export async function registerPushNotifications(profileId?: string, phone?: stri
       });
     }
 
-    // 4. Save Subscription to Database via API
+    // 4. Properly serialize PushSubscription JSON object
     if (subscription) {
-      await fetch('/api/push', {
+      const rawJson = subscription.toJSON ? subscription.toJSON() : (subscription as any);
+      const serializedSub = {
+        endpoint: subscription.endpoint,
+        keys: {
+          p256dh: rawJson.keys?.p256dh || '',
+          auth: rawJson.keys?.auth || '',
+        },
+      };
+
+      const res = await fetch('/api/push', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'subscribe',
-          subscription,
+          subscription: serializedSub,
           profileId,
           phone,
         }),
       });
+
+      const resData = await res.json();
+      if (!resData.success) {
+        console.warn('Subscription save warning:', resData.error);
+      }
     }
 
     // 5. Trigger Welcome Confirmation Notification
-    registration.showNotification('FoodBook Alerts Active 🔔', {
-      body: 'You will receive 1-tap alerts when food is ready and before meal deadlines!',
-      icon: '/icons/icon-192x192.png',
-      badge: '/icons/favicon.png',
-      vibrate: [150, 50, 150],
-      tag: 'foodbook-welcome',
-    } as any);
+    try {
+      registration.showNotification('FoodBook Alerts Active 🔔', {
+        body: 'You will receive 1-tap alerts when food is ready and before meal deadlines!',
+        icon: '/icons/icon-192x192.png',
+        badge: '/icons/favicon.png',
+        vibrate: [150, 50, 150],
+        tag: 'foodbook-welcome',
+      } as any);
+    } catch (notifErr) {
+      console.warn('Show confirmation notification error:', notifErr);
+    }
 
     return { success: true, permission: 'granted' };
   } catch (err: any) {

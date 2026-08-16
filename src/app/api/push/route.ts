@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import webPush from 'web-push';
-import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@supabase/supabase-js';
 import type { MealType } from '@/types/database.types';
 
 const vapidPublicKey =
@@ -14,18 +14,32 @@ webPush.setVapidDetails(vapidSubject, vapidPublicKey, vapidPrivateKey);
 
 const MEAL_PRESETS: Record<MealType, { title: string; body: string }> = {
   breakfast: {
-    title: "Breakfast 🍳",
-    body: "Poha / Upma / Vada Pav",
+    title: 'Breakfast Alert 🍳',
+    body: 'Breakfast is ready in the dining hall! Confirm your attendance.',
   },
   lunch: {
-    title: "Lunch 🍛",
-    body: "Veg Thali / Non-Veg Thali",
+    title: 'Lunch Alert 🍛',
+    body: 'Lunch is ready in the dining hall! Confirm your attendance.',
   },
   dinner: {
-    title: "Dinner 🍲",
-    body: "Veg Thali / Non-Veg Thali",
+    title: 'Dinner Alert 🍲',
+    body: 'Dinner is ready in the dining hall! Confirm your attendance.',
   },
 };
+
+function getSupabaseServerClient() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+    '';
+
+  if (!supabaseUrl || !supabaseKey) return null;
+
+  return createClient(supabaseUrl, supabaseKey, {
+    auth: { persistSession: false },
+  });
+}
 
 export async function POST(request: Request) {
   try {
@@ -41,6 +55,8 @@ export async function POST(request: Request) {
       broadcast?: boolean;
     };
 
+    const supabase = getSupabaseServerClient();
+
     // 1. Action: Save new Web Push Subscription
     if (action === 'subscribe') {
       if (!subscription || !subscription.endpoint) {
@@ -50,11 +66,9 @@ export async function POST(request: Request) {
         );
       }
 
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      if (supabaseUrl && !supabaseUrl.includes('sample-pg-canteen')) {
+      if (supabase) {
         try {
-          const supabase = await createClient();
-          await (supabase.from('push_subscriptions') as any).upsert(
+          const { error: dbErr } = await supabase.from('push_subscriptions').upsert(
             {
               endpoint: subscription.endpoint,
               p256dh: subscription.keys?.p256dh || '',
@@ -63,6 +77,10 @@ export async function POST(request: Request) {
             },
             { onConflict: 'endpoint' }
           );
+
+          if (dbErr) {
+            console.error('Failed to store push subscription:', dbErr);
+          }
         } catch (dbErr: any) {
           console.error('Failed to store push subscription:', dbErr);
         }
@@ -70,7 +88,7 @@ export async function POST(request: Request) {
 
       return NextResponse.json({
         success: true,
-        message: 'Push subscription stored successfully',
+        message: 'Push subscription stored successfully in database',
       });
     }
 
@@ -79,7 +97,7 @@ export async function POST(request: Request) {
 
     const mealName = payload?.body || preset.body;
     const notificationPayload = JSON.stringify({
-      title: payload?.title || `${targetMeal.charAt(0).toUpperCase() + targetMeal.slice(1)} 🍽️`,
+      title: payload?.title || `${targetMeal.charAt(0).toUpperCase() + targetMeal.slice(1)} Alert 🍽️`,
       body: mealName,
       url: `/?meal=${targetMeal}`,
       mealType: targetMeal,
@@ -91,11 +109,10 @@ export async function POST(request: Request) {
     // 2. Broadcast mode: Dispatch to all registered push subscriptions
     if (broadcast) {
       let sentCount = 0;
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      let failedCount = 0;
 
-      if (supabaseUrl && !supabaseUrl.includes('sample-pg-canteen')) {
+      if (supabase) {
         try {
-          const supabase = await createClient();
           const { data: subscriptions } = await supabase
             .from('push_subscriptions')
             .select('*');
@@ -109,15 +126,21 @@ export async function POST(request: Request) {
                   auth: sub.auth,
                 },
               };
+
               return webPush
                 .sendNotification(pushSubscription, notificationPayload)
                 .then(() => {
                   sentCount++;
                 })
                 .catch((err) => {
-                  console.error('Failed push to subscription:', sub.id, err?.statusCode);
+                  failedCount++;
+                  console.error('Push delivery failure:', sub.id, err?.statusCode);
+                  if (err?.statusCode === 410 || err?.statusCode === 404) {
+                    supabase.from('push_subscriptions').delete().eq('id', sub.id).then();
+                  }
                 });
             });
+
             await Promise.allSettled(pushPromises);
           }
         } catch (dbErr) {
@@ -129,8 +152,9 @@ export async function POST(request: Request) {
         success: true,
         broadcast: true,
         sentCount,
+        failedCount,
         mealType: targetMeal,
-        message: `Notification broadcast sent to ${sentCount} devices for ${targetMeal.toUpperCase()}`,
+        message: `Notification broadcast dispatched to ${sentCount} device(s) for ${targetMeal.toUpperCase()}`,
       });
     }
 
