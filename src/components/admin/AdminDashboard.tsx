@@ -2,7 +2,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/lib/auth/auth-context';
-import { DataStore, MEAL_SCHEDULES } from '@/lib/data/data-store';
+import { createClient } from '@/lib/supabase/client';
+import { DataStore, MEAL_SCHEDULES, isSupabaseConfigured } from '@/lib/data/data-store';
 import type { Menu, Profile, Booking, MenuItem, MealType } from '@/types/database.types';
 import {
   ChefHat,
@@ -73,7 +74,29 @@ export function AdminDashboard() {
 
   const targetDateStr = selectedDay === 'today' ? todayStr : tomorrowStr;
 
-  const refreshAdminData = () => {
+  const refreshAdminData = async () => {
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = createClient();
+        const { data: dbMenus } = await supabase.from('menus').select('*');
+        if (dbMenus && dbMenus.length > 0) {
+          DataStore.saveMenus(dbMenus as Menu[]);
+          setMenus(dbMenus as Menu[]);
+        }
+        const { data: dbProfiles } = await supabase.from('profiles').select('*');
+        if (dbProfiles && dbProfiles.length > 0) {
+          DataStore.saveProfiles(dbProfiles as Profile[]);
+          setProfiles(dbProfiles as Profile[]);
+        }
+        const { data: dbBookings } = await supabase.from('bookings').select('*');
+        if (dbBookings) {
+          DataStore.saveBookings(dbBookings as Booking[]);
+          setBookings(dbBookings as Booking[]);
+        }
+      } catch (err) {
+        console.error('Admin live sync error:', err);
+      }
+    }
     const loadedMenus = DataStore.getMenus();
     setMenus(loadedMenus);
     const loadedProfiles = DataStore.getProfiles();

@@ -2,7 +2,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/lib/auth/auth-context';
-import { DataStore, MEAL_SCHEDULES } from '@/lib/data/data-store';
+import { createClient } from '@/lib/supabase/client';
+import { DataStore, MEAL_SCHEDULES, isSupabaseConfigured } from '@/lib/data/data-store';
 import type { Menu, Booking, BookingStatus, MenuItem, MealType } from '@/types/database.types';
 import { triggerMealConfetti } from '@/components/ui/Confetti';
 import {
@@ -29,7 +30,24 @@ export function ResidentMealView() {
   const [isLoading, setIsLoading] = useState(false);
 
   // Load menus & bookings
-  const refreshData = () => {
+  const refreshData = async () => {
+    if (isSupabaseConfigured()) {
+      try {
+        const supabase = createClient();
+        const { data: dbMenus } = await supabase.from('menus').select('*');
+        if (dbMenus && dbMenus.length > 0) {
+          DataStore.saveMenus(dbMenus as Menu[]);
+          setMenus(dbMenus as Menu[]);
+        }
+        const { data: dbBookings } = await supabase.from('bookings').select('*');
+        if (dbBookings) {
+          DataStore.saveBookings(dbBookings as Booking[]);
+          setBookings(dbBookings as Booking[]);
+        }
+      } catch (err) {
+        console.error('Live sync error:', err);
+      }
+    }
     const loadedMenus = DataStore.getMenus();
     setMenus(loadedMenus);
     const loadedBookings = DataStore.getBookings();
@@ -71,13 +89,22 @@ export function ResidentMealView() {
 
   const activeSchedule = MEAL_SCHEDULES[selectedMealType] || MEAL_SCHEDULES.dinner;
 
-  // Active menu booking status for logged-in user
+  // Active menu booking status for logged-in user (matches direct ID or slot)
   const activeBooking =
     user && activeMenu
       ? bookings.find(
-          (b) => b.menu_id === activeMenu.id && b.profile_id === user.id
+          (b) =>
+            b.profile_id === user.id &&
+            (b.menu_id === activeMenu.id ||
+              menus.some(
+                (m) =>
+                  m.id === b.menu_id &&
+                  m.date === targetDateStr &&
+                  m.meal_type === selectedMealType
+              ))
         )
       : undefined;
+
   const currentStatus: BookingStatus | 'unbooked' = activeBooking
     ? activeBooking.status
     : 'unbooked';
@@ -96,8 +123,9 @@ export function ResidentMealView() {
         triggerMealConfetti();
       }
       await DataStore.toggleBooking(activeMenu.id, user.id, status);
-      refreshData();
+      await refreshData();
     } catch (err: any) {
+      console.error('Failed to update booking:', err);
       alert(err.message || 'Failed to update booking');
     } finally {
       setIsLoading(false);
