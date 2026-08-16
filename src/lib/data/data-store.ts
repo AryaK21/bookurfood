@@ -6,10 +6,20 @@ const INITIAL_PROFILES: Profile[] = [
   {
     id: '00000000-0000-0000-0000-000000000001',
     user_id: 'admin-01',
-    phone_number: '+919876543210',
-    name: 'Admin Manager',
+    phone_number: '+918208315074',
+    name: 'Pramod Shelke',
     room_number: 'Office',
     role: 'admin',
+    is_active: true,
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: '00000000-0000-0000-0000-000000000002',
+    user_id: 'res-01',
+    phone_number: '+919370291205',
+    name: 'Arya Kukkadwal',
+    room_number: '102-A',
+    role: 'resident',
     is_active: true,
     created_at: new Date().toISOString(),
   },
@@ -110,23 +120,21 @@ export class DataStore {
     if (isSupabaseConfigured()) {
       try {
         const supabase = createClient();
-        const { data, error } = await (supabase.rpc as any)('verify_whitelist_phone', {
-          phone_input: cleanPhone,
-        });
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('is_active', true);
 
-        if (error) throw error;
-        if (data && Array.isArray(data) && data.length > 0 && data[0].is_whitelisted) {
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('phone_number', cleanPhone)
-            .single();
-
-          if (profile) {
-            return { isWhitelisted: true, profile: profile as unknown as Profile };
+        if (!error && data) {
+          const matched = (data as Profile[]).find(
+            (p) =>
+              p.phone_number.replace(/\s+/g, '') === cleanPhone ||
+              p.phone_number.slice(-10) === last10
+          );
+          if (matched) {
+            return { isWhitelisted: true, profile: matched };
           }
         }
-        return { isWhitelisted: false, error: 'Phone number not found in resident whitelist.' };
       } catch (err: unknown) {
         console.error('Supabase whitelist check error:', err);
       }
@@ -513,5 +521,30 @@ export class DataStore {
       percentage: total > 0 ? Math.round((eatingCount / total) * 100) : 0,
       bookings,
     };
+  }
+
+  // -------------------------------------------------------------
+  // Notification Rate Limiting (1 Broadcast per Meal per Day)
+  // -------------------------------------------------------------
+  static isMealNotified(date: string, mealType: MealType): boolean {
+    if (typeof window === 'undefined') return false;
+    try {
+      const record = localStorage.getItem(`foodbook_notif_sent_${date}_${mealType}`);
+      return !!record;
+    } catch {
+      return false;
+    }
+  }
+
+  static markMealNotified(date: string, mealType: MealType): void {
+    if (typeof window === 'undefined') return;
+    try {
+      localStorage.setItem(
+        `foodbook_notif_sent_${date}_${mealType}`,
+        JSON.stringify({ sentAt: new Date().toISOString() })
+      );
+    } catch (e) {
+      console.error('Failed to save notification rate limit state:', e);
+    }
   }
 }

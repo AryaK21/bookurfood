@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import webPush from 'web-push';
+import { createClient } from '@/lib/supabase/server';
 import type { MealType } from '@/types/database.types';
 
 const vapidPublicKey =
@@ -14,36 +15,38 @@ webPush.setVapidDetails(vapidSubject, vapidPublicKey, vapidPrivateKey);
 const MEAL_PRESETS: Record<MealType, { title: string; body: string }> = {
   breakfast: {
     title: "Breakfast 🍳",
-    body: "South Indian Idli & Vada",
+    body: "Poha / Upma / Vada Pav",
   },
   lunch: {
     title: "Lunch 🍛",
-    body: "North Indian Veg Thali",
+    body: "Veg Thali / Non-Veg Thali",
   },
   dinner: {
     title: "Dinner 🍲",
-    body: "Special Dum Biryani Feast",
+    body: "Veg Thali / Non-Veg Thali",
   },
 };
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { subscription, mealType, payload, profileId, menuId, phone } = body as {
+    const { subscription, mealType, payload, profileId, menuId, phone, broadcast } = body as {
       subscription?: any;
       mealType?: MealType;
       payload?: any;
       profileId?: string;
       menuId?: string;
       phone?: string;
+      broadcast?: boolean;
     };
 
-    const targetMeal: MealType = mealType || 'dinner';
-    const preset = MEAL_PRESETS[targetMeal] || MEAL_PRESETS.dinner;
+    const targetMeal: MealType = mealType || 'lunch';
+    const preset = MEAL_PRESETS[targetMeal] || MEAL_PRESETS.lunch;
 
+    const mealName = payload?.body || preset.body;
     const notificationPayload = JSON.stringify({
-      title: payload?.title || preset.title,
-      body: payload?.body || preset.body,
+      title: payload?.title || `${targetMeal.charAt(0).toUpperCase() + targetMeal.slice(1)} 🍽️`,
+      body: mealName,
       url: `/?meal=${targetMeal}`,
       mealType: targetMeal,
       menuId: menuId,
@@ -51,6 +54,53 @@ export async function POST(request: Request) {
       phone: phone,
     });
 
+    // 1. Broadcast mode: Dispatch to all registered push subscriptions
+    if (broadcast) {
+      let sentCount = 0;
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+
+      if (supabaseUrl && !supabaseUrl.includes('sample-pg-canteen')) {
+        try {
+          const supabase = await createClient();
+          const { data: subscriptions } = await supabase
+            .from('push_subscriptions')
+            .select('*');
+
+          if (subscriptions && subscriptions.length > 0) {
+            const pushPromises = subscriptions.map((sub: any) => {
+              const pushSubscription = {
+                endpoint: sub.endpoint,
+                keys: {
+                  p256dh: sub.p256dh,
+                  auth: sub.auth,
+                },
+              };
+              return webPush
+                .sendNotification(pushSubscription, notificationPayload)
+                .then(() => {
+                  sentCount++;
+                })
+                .catch((err) => {
+                  console.error('Failed push to subscription:', sub.id, err?.statusCode);
+                });
+            });
+            await Promise.allSettled(pushPromises);
+          }
+        } catch (dbErr) {
+          console.error('Broadcast fetch error:', dbErr);
+        }
+      }
+
+      return NextResponse.json({
+        success: true,
+        broadcast: true,
+        sentCount,
+        mealType: targetMeal,
+        message: `Notification broadcast sent for ${targetMeal.toUpperCase()}`,
+      });
+    }
+
+    // 2. Direct single subscription push
     if (subscription) {
       await webPush.sendNotification(subscription, notificationPayload);
     }
@@ -58,7 +108,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       success: true,
       mealType: targetMeal,
-      message: `${targetMeal.toUpperCase()} reminder dispatched with 1-tap Tick/Cross actions`,
+      message: `${targetMeal.toUpperCase()} reminder dispatched`,
     });
   } catch (error: any) {
     console.error('Push dispatch error:', error);

@@ -1,9 +1,8 @@
 'use client';
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { createClient } from '@/lib/supabase/client';
-import { DataStore, isSupabaseConfigured } from '@/lib/data/data-store';
-import type { Profile, UserRole } from '@/types/database.types';
+import { DataStore } from '@/lib/data/data-store';
+import type { Profile } from '@/types/database.types';
 
 interface AuthState {
   user: Profile | null;
@@ -11,9 +10,8 @@ interface AuthState {
   isAuthenticated: boolean;
   isAdmin: boolean;
   error: string | null;
-  sendOtp: (phone: string) => Promise<{ success: boolean; error?: string; message?: string }>;
-  verifyOtp: (phone: string, token: string) => Promise<{ success: boolean; error?: string }>;
-  loginAsDemoUser: (role: UserRole, phone?: string) => Promise<void>;
+  loginWithPhone: (phone: string) => Promise<{ success: boolean; error?: string }>;
+  loginAsDevAdmin: (id: string, pass: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
   clearError: () => void;
 }
@@ -27,31 +25,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Initialize session
+  // Initialize session from localStorage
   useEffect(() => {
-    async function initAuth() {
+    function initAuth() {
       setIsLoading(true);
       try {
-        if (isSupabaseConfigured()) {
-          const supabase = createClient();
-          const { data: { session } } = await supabase.auth.getSession();
-
-          if (session?.user?.phone) {
-            const { data: profile } = await supabase
-              .from('profiles')
-              .select('*')
-              .eq('phone_number', session.user.phone)
-              .single();
-
-            if (profile) {
-              setUser(profile as Profile);
-              setIsLoading(false);
-              return;
-            }
-          }
-        }
-
-        // Check local storage for active session
         const stored = localStorage.getItem(CURRENT_USER_KEY);
         if (stored) {
           setUser(JSON.parse(stored));
@@ -66,126 +44,59 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     initAuth();
   }, []);
 
-  // 1. Send OTP (Strict Anti-Spam Whitelist Check FIRST)
-  const sendOtp = async (phone: string): Promise<{ success: boolean; error?: string; message?: string }> => {
+  // 1-Step Direct Phone Login (Checks if registered in database)
+  const loginWithPhone = async (phone: string): Promise<{ success: boolean; error?: string }> => {
     setError(null);
-    const cleanPhone = phone.replace(/\s+/g, '');
+    const cleanPhone = phone.trim();
 
-    // Strict Anti-Spam: Validate if the number is pre-authorized by Admin
+    if (!cleanPhone || cleanPhone.replace(/\D/g, '').length < 10) {
+      const err = 'Please enter a valid 10-digit mobile number.';
+      setError(err);
+      return { success: false, error: err };
+    }
+
+    // Check if the number is registered in the PG database
     const whitelistResult = await DataStore.verifyWhitelist(cleanPhone);
     if (!whitelistResult.isWhitelisted || !whitelistResult.profile) {
       const rejectionMsg =
-        'Access Denied: Your phone number is not pre-registered in the PG resident whitelist. Please contact your PG manager to get added.';
+        'This phone number is not registered in the PG directory. Please ask your PG Manager to add you.';
       setError(rejectionMsg);
       return { success: false, error: rejectionMsg };
     }
 
-    if (isSupabaseConfigured()) {
-      try {
-        const supabase = createClient();
-        const { error: otpError } = await supabase.auth.signInWithOtp({
-          phone: cleanPhone,
-        });
-        if (otpError) {
-          setError(otpError.message);
-          return { success: false, error: otpError.message };
-        }
-        return { success: true, message: `OTP sent to ${cleanPhone}` };
-      } catch (err: any) {
-        const msg = err.message || 'Failed to send OTP via Supabase';
-        setError(msg);
-        return { success: false, error: msg };
-      }
-    }
-
-    // In demo/preview mode: Simulate OTP dispatch with test OTP "123456"
-    return {
-      success: true,
-      message: `[Preview Mode] OTP simulated for ${whitelistResult.profile.name} (${whitelistResult.profile.role}). Use code: 123456`,
-    };
+    const profile = whitelistResult.profile;
+    setUser(profile);
+    localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(profile));
+    return { success: true };
   };
 
-  // 2. Verify OTP
-  const verifyOtp = async (phone: string, token: string): Promise<{ success: boolean; error?: string }> => {
+  // Developer Admin Login for /admin (id: admin, pass: Arya@21)
+  const loginAsDevAdmin = async (id: string, pass: string): Promise<{ success: boolean; error?: string }> => {
     setError(null);
-    const cleanPhone = phone.replace(/\s+/g, '');
-
-    const whitelistResult = await DataStore.verifyWhitelist(cleanPhone);
-    if (!whitelistResult.isWhitelisted || !whitelistResult.profile) {
-      const rejectionMsg = 'Unauthorized: Number not found in resident directory.';
-      setError(rejectionMsg);
-      return { success: false, error: rejectionMsg };
-    }
-
-    if (isSupabaseConfigured()) {
-      try {
-        const supabase = createClient();
-        const { data, error: verifyError } = await supabase.auth.verifyOtp({
-          phone: cleanPhone,
-          token,
-          type: 'sms',
-        });
-
-        if (verifyError) {
-          setError(verifyError.message);
-          return { success: false, error: verifyError.message };
-        }
-
-        if (data.session) {
-          const profile = whitelistResult.profile;
-          setUser(profile);
-          localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(profile));
-          return { success: true };
-        }
-      } catch (err: any) {
-        setError(err.message || 'OTP verification failed');
-        return { success: false, error: err.message };
-      }
-    }
-
-    // Demo Mode Verification (accepts '123456' or any 6 digit test code)
-    if (token.length >= 4) {
-      const profile = whitelistResult.profile;
-      setUser(profile);
-      localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(profile));
+    if (id.trim() === 'admin' && pass === 'Arya@21') {
+      const adminProfile: Profile = {
+        id: '00000000-0000-0000-0000-000000000001',
+        user_id: 'admin-01',
+        phone_number: '+918208315074',
+        name: 'Pramod Shelke',
+        room_number: 'Office',
+        role: 'admin',
+        is_active: true,
+        created_at: new Date().toISOString(),
+      };
+      setUser(adminProfile);
+      localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(adminProfile));
       return { success: true };
-    } else {
-      setError('Invalid OTP code. Please enter the 6-digit code.');
-      return { success: false, error: 'Invalid OTP' };
     }
+    const err = 'Invalid developer credentials. Please check ID and password.';
+    setError(err);
+    return { success: false, error: err };
   };
 
-  // 3. Instant Demo Login (Resident or Admin for frictionless testing)
-  const loginAsDemoUser = async (role: UserRole, phone?: string) => {
-    const profiles = DataStore.getProfiles();
-    let target: Profile | undefined;
-
-    if (phone) {
-      target = profiles.find((p) => p.phone_number === phone);
-    } else {
-      target = profiles.find((p) => p.role === role && p.is_active);
-    }
-
-    if (target) {
-      setUser(target);
-      localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(target));
-      setError(null);
-    }
-  };
-
-  // 4. Logout
+  // Sign out & clear saved credentials
   const logout = async () => {
-    try {
-      if (isSupabaseConfigured()) {
-        const supabase = createClient();
-        await supabase.auth.signOut();
-      }
-    } catch (err) {
-      console.error('Logout error:', err);
-    } finally {
-      setUser(null);
-      localStorage.removeItem(CURRENT_USER_KEY);
-    }
+    setUser(null);
+    localStorage.removeItem(CURRENT_USER_KEY);
   };
 
   const clearError = () => setError(null);
@@ -193,12 +104,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const value: AuthState = {
     user,
     isLoading,
-    isAuthenticated: Boolean(user),
+    isAuthenticated: !!user,
     isAdmin: user?.role === 'admin',
     error,
-    sendOtp,
-    verifyOtp,
-    loginAsDemoUser,
+    loginWithPhone,
+    loginAsDevAdmin,
     logout,
     clearError,
   };
@@ -208,7 +118,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
 export function useAuth() {
   const context = useContext(AuthContext);
-  if (!context) {
+  if (context === undefined) {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;

@@ -5,7 +5,9 @@ import { useAuth } from '@/lib/auth/auth-context';
 import { Navbar } from '@/components/ui/Navbar';
 import { ResidentMealView } from '@/components/resident/ResidentMealView';
 import { LoginForm } from '@/components/auth/LoginForm';
+import { InstallAppPrompt } from '@/components/pwa/InstallAppPrompt';
 import { Utensils } from 'lucide-react';
+import Link from 'next/link';
 
 import { AdminDashboard } from '@/components/admin/AdminDashboard';
 
@@ -30,6 +32,9 @@ export default function HomePage() {
       <Navbar />
 
       <main className="flex-1 px-3.5 sm:px-6 py-3 sm:py-5 max-w-2xl mx-auto w-full space-y-3.5 sm:space-y-4 flex flex-col justify-center">
+        {/* PWA 1-Tap Browser Install Prompt */}
+        <InstallAppPrompt />
+
         {isAuthenticated && user ? (
           isAdmin ? (
             /* DIRECT ADMIN DASHBOARD VIEW FOR ADMIN ACCOUNT */
@@ -64,8 +69,12 @@ export default function HomePage() {
       </main>
 
       {!isAdmin && (
-        <footer className="text-center py-2.5 border-t border-zinc-900/80 text-[11px] text-zinc-600 font-medium">
-          FoodBook • PG Canteen Meal Booking System • PWA
+        <footer className="text-center py-2.5 border-t border-zinc-900/80 text-[11px] text-zinc-500 font-medium flex items-center justify-center gap-3">
+          <span>FoodBook • PG Meal System</span>
+          <span>•</span>
+          <Link href="/install" className="text-zinc-400 hover:text-green-400 font-bold transition-colors">
+            📲 Install as App
+          </Link>
         </footer>
       )}
     </div>

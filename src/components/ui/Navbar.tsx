@@ -4,11 +4,11 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/lib/auth/auth-context';
-import { Utensils, Shield, LogOut, User, ChevronDown, Sparkles } from 'lucide-react';
+import { Utensils, Shield, LogOut, Download, ChevronDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export function Navbar() {
-  const { user, isAdmin, logout, loginAsDemoUser } = useAuth();
+  const { user, isAdmin, logout } = useAuth();
   const pathname = usePathname();
   const [showSwitchMenu, setShowSwitchMenu] = useState(false);
 
@@ -37,6 +37,17 @@ export function Navbar() {
 
         {/* Right Action Area */}
         <div className="flex items-center gap-2 sm:gap-3">
+          {/* Quick Install Guide Link */}
+          <Link href="/install">
+            <button
+              title="Install FoodBook App"
+              className="flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-full bg-[#1e1e1e] border border-zinc-700/80 text-zinc-300 hover:text-green-400 hover:border-green-500/50 text-xs font-bold transition-all cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5 text-green-400" />
+              <span className="hidden sm:inline">Install App</span>
+            </button>
+          </Link>
+
           {/* Admin Navigation Button */}
           {isAdmin && (
             <Link href={pathname === '/admin' ? '/' : '/admin'}>
@@ -53,7 +64,7 @@ export function Navbar() {
             </Link>
           )}
 
-          {/* User Profile Pill & Demo Switcher */}
+          {/* User Profile Pill */}
           {user ? (
             <div className="relative">
               <button
@@ -74,7 +85,7 @@ export function Navbar() {
                 <ChevronDown className="w-3.5 h-3.5 text-zinc-400" />
               </button>
 
-              {/* Quick Persona Switcher Dropdown */}
+              {/* Profile Dropdown */}
               <AnimatePresence>
                 {showSwitchMenu && (
                   <>
@@ -97,13 +108,22 @@ export function Navbar() {
                         </span>
                       </div>
 
-                      <div className="p-1">
+                      <div className="p-1 space-y-1">
+                        <Link
+                          href="/install"
+                          onClick={() => setShowSwitchMenu(false)}
+                          className="w-full text-left px-3 py-2 rounded-xl text-xs font-bold text-zinc-300 hover:bg-zinc-800 flex items-center gap-2 transition-colors cursor-pointer"
+                        >
+                          <Download className="w-4 h-4 text-green-400" />
+                          <span>Install as App (Guide)</span>
+                        </Link>
+
                         <button
                           onClick={() => {
                             logout();
                             setShowSwitchMenu(false);
                           }}
-                          className="w-full text-left px-3 py-2.5 rounded-xl text-xs font-bold text-red-400 hover:bg-red-500/10 flex items-center gap-2 transition-colors cursor-pointer"
+                          className="w-full text-left px-3 py-2 rounded-xl text-xs font-bold text-red-400 hover:bg-red-500/10 flex items-center gap-2 transition-colors cursor-pointer"
                         >
                           <LogOut className="w-4 h-4" />
                           <span>Sign Out</span>

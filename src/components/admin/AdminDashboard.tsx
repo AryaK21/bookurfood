@@ -28,6 +28,8 @@ import {
   ChevronUp,
   Settings2,
   RotateCcw,
+  Bell,
+  Share2,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -42,6 +44,10 @@ export function AdminDashboard() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
 
+  // Food Ready broadcast state & rate limit
+  const [isBroadcasting, setIsBroadcasting] = useState(false);
+  const [broadcastFeedback, setBroadcastFeedback] = useState<string | null>(null);
+
   // Simple 2-field menu form state
   const [menuTitle, setMenuTitle] = useState('');
   const [menuItemsText, setMenuItemsText] = useState('');
@@ -52,7 +58,7 @@ export function AdminDashboard() {
 
   // Add resident simple form state
   const [newResidentName, setNewResidentName] = useState('');
-  const [newResidentPhone, setNewResidentPhone] = useState('+91 ');
+  const [newResidentPhone, setNewResidentPhone] = useState('');
   const [newResidentRoom, setNewResidentRoom] = useState('');
   const [residentSearchQuery, setResidentSearchQuery] = useState('');
   const [residentAddError, setResidentAddError] = useState('');
@@ -200,23 +206,24 @@ export function AdminDashboard() {
     setResidentAddError('');
     setResidentAddSuccess('');
 
-    if (!newResidentName || !newResidentPhone || newResidentPhone.length < 10) {
-      setResidentAddError('Please enter the resident name and mobile number.');
+    const cleanDigits = newResidentPhone.replace(/\D/g, '');
+    if (!newResidentName.trim() || cleanDigits.length !== 10) {
+      setResidentAddError('Please enter a valid 10-digit mobile number.');
       return;
     }
 
     try {
       await DataStore.addProfile({
         name: newResidentName.trim(),
-        phone_number: newResidentPhone.trim(),
+        phone_number: `+91${cleanDigits}`,
         room_number: newResidentRoom.trim() || null,
         role: 'resident',
         is_active: true,
       });
 
-      setResidentAddSuccess(`✓ Added ${newResidentName} to resident list!`);
+      setResidentAddSuccess(`✓ Added ${newResidentName} (+91 ${cleanDigits}) to resident list!`);
       setNewResidentName('');
-      setNewResidentPhone('+91 ');
+      setNewResidentPhone('');
       setNewResidentRoom('');
       refreshAdminData();
     } catch (err: any) {
@@ -243,6 +250,54 @@ export function AdminDashboard() {
     navigator.clipboard.writeText(text);
     setCopiedSummary(true);
     setTimeout(() => setCopiedSummary(false), 3000);
+  };
+
+  // Check rate limit (1 broadcast per meal per day)
+  const isMealNotified = DataStore.isMealNotified(targetDateStr, selectedMealType);
+
+  // Broadcast "Food is Ready" push notification to all resident devices
+  const handleSendFoodReadyAlert = async () => {
+    if (isMealNotified || isBroadcasting) return;
+
+    setIsBroadcasting(true);
+    setBroadcastFeedback(null);
+
+    const mealName =
+      activeMenu?.title && activeMenu.title !== 'Menu not added yet'
+        ? activeMenu.title
+        : `${selectedMealType.toUpperCase()} Special`;
+
+    try {
+      await fetch('/api/push', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          broadcast: true,
+          mealType: selectedMealType,
+          menuId: activeMenu?.id,
+          payload: {
+            title: `${selectedMealType.charAt(0).toUpperCase() + selectedMealType.slice(1)} Food Alert 🍽️`,
+            body: `${mealName} is ready in the dining hall!`,
+          },
+        }),
+      });
+
+      DataStore.markMealNotified(targetDateStr, selectedMealType);
+      setBroadcastFeedback(`✓ Alert sent for ${selectedMealType.toUpperCase()}! (Rate limit: 1 per meal)`);
+      setTimeout(() => setBroadcastFeedback(null), 4500);
+    } catch (err: any) {
+      setBroadcastFeedback('Failed to send notification: ' + err.message);
+    } finally {
+      setIsBroadcasting(false);
+    }
+  };
+
+  // Share registration/menu link via WhatsApp for unwhitelisted or new residents
+  const shareRegistrationLink = () => {
+    const appUrl = typeof window !== 'undefined' ? window.location.origin : 'https://bookurfood.vercel.app';
+    const text = `🍽️ *PG FOOD ALERT: ${selectedMealType.toUpperCase()} IS READY!*\n*Menu:* ${activeMenu?.title || 'Daily Meal'}\n\n👉 *Tap here to book your plate or register:* ${appUrl}`;
+    const waUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+    window.open(waUrl, '_blank');
   };
 
   return (
@@ -400,15 +455,60 @@ export function AdminDashboard() {
             </div>
           </div>
 
-          {/* 1-TAP COPY FOR WHATSAPP BUTTON */}
-          <button
-            type="button"
-            onClick={copyKitchenSummary}
-            className="w-full py-3.5 px-4 rounded-2xl bg-green-500 hover:bg-green-400 text-black font-black text-sm border-b-4 border-b-green-700 active:border-b-0 active:translate-y-1 flex items-center justify-center gap-2 cursor-pointer shadow-md transition-all"
-          >
-            <Copy className="w-4 h-4" />
-            <span>{copiedSummary ? '✓ Copied to Clipboard!' : 'Copy Headcount for WhatsApp'}</span>
-          </button>
+          {/* BROADCAST ALERT FEEDBACK */}
+          {broadcastFeedback && (
+            <div className="p-3 rounded-2xl bg-amber-950/70 border border-amber-800 text-xs text-amber-300 font-bold flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-amber-400 flex-shrink-0" />
+              <span>{broadcastFeedback}</span>
+            </div>
+          )}
+
+          {/* ACTION BUTTON 1: BROADCAST "FOOD IS READY" NOTIFICATION (RATE-LIMITED 1 PER MEAL) */}
+          <div className="space-y-2 pt-1">
+            <button
+              type="button"
+              disabled={isMealNotified || isBroadcasting}
+              onClick={handleSendFoodReadyAlert}
+              className={`
+                w-full py-3.5 px-4 rounded-2xl font-black text-xs sm:text-sm flex items-center justify-center gap-2 transition-all shadow-md
+                ${
+                  isMealNotified
+                    ? 'bg-zinc-900 border-2 border-zinc-800 text-zinc-500 cursor-not-allowed'
+                    : 'bg-amber-500 hover:bg-amber-400 text-black border-b-4 border-b-amber-700 active:border-b-0 active:translate-y-1 cursor-pointer'
+                }
+              `}
+            >
+              <Bell className="w-4 h-4" />
+              <span>
+                {isMealNotified
+                  ? `✓ Alert Sent for ${selectedMealType.toUpperCase()} (1 per meal limit)`
+                  : isBroadcasting
+                  ? 'Sending Alerts to Residents...'
+                  : `🔔 Alert Residents: ${selectedMealType.toUpperCase()} is Ready`}
+              </span>
+            </button>
+
+            {/* ACTION BUTTON 2: WHATSAPP HEADCOUNT & REGISTRATION SHARE */}
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={copyKitchenSummary}
+                className="py-3 px-3 rounded-2xl bg-[#181818] hover:bg-zinc-800 text-zinc-200 border border-zinc-700 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+              >
+                <Copy className="w-3.5 h-3.5 text-green-400" />
+                <span>{copiedSummary ? '✓ Copied!' : 'Copy Count'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={shareRegistrationLink}
+                className="py-3 px-3 rounded-2xl bg-green-950/40 hover:bg-green-950/70 text-green-300 border border-green-800/80 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+              >
+                <Share2 className="w-3.5 h-3.5 text-green-400" />
+                <span>Share WhatsApp</span>
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -646,19 +746,26 @@ export function AdminDashboard() {
                 />
               </div>
 
-              {/* 2. Phone Number */}
+              {/* 2. Phone Number with locked +91 */}
               <div className="space-y-1">
                 <label className="block text-xs font-black uppercase tracking-wider text-zinc-300">
                   Mobile Number
                 </label>
-                <input
-                  type="tel"
-                  value={newResidentPhone}
-                  onChange={(e) => setNewResidentPhone(e.target.value)}
-                  placeholder="+91 9876543210"
-                  required
-                  className="w-full px-4 py-3 rounded-2xl bg-[#141414] border border-zinc-700 text-white font-bold text-sm focus:outline-none focus:border-green-500"
-                />
+                <div className="relative flex items-center rounded-2xl bg-[#141414] border border-zinc-700 focus-within:border-green-500 overflow-hidden shadow-inner">
+                  <div className="flex items-center gap-1.5 pl-3.5 pr-2.5 py-3 bg-zinc-900 border-r border-zinc-700/80 text-zinc-300 font-black text-xs select-none flex-shrink-0">
+                    <span className="text-sm">🇮🇳</span>
+                    <span>+91</span>
+                  </div>
+                  <input
+                    type="tel"
+                    maxLength={10}
+                    value={newResidentPhone}
+                    onChange={(e) => setNewResidentPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                    placeholder="98765 43210"
+                    required
+                    className="w-full px-3.5 py-3 bg-transparent text-white font-black text-sm tracking-wider focus:outline-none placeholder-zinc-600"
+                  />
+                </div>
               </div>
 
               {/* 3. Room Number */}

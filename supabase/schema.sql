@@ -291,13 +291,20 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.bookings;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.profiles;
 
 -- ==============================================================================
--- INITIAL SETUP (Primary Admin Profile)
+-- INITIAL SETUP (Admin & Resident Whitelist)
 -- ==============================================================================
 
--- 1. Initial Admin Profile (Manager)
+-- 1. Admin Profile (Manager Pramod Shelke)
 INSERT INTO public.profiles (id, phone_number, name, room_number, role, is_active)
 VALUES 
-  ('00000000-0000-0000-0000-000000000001', '+919876543210', 'Admin Manager', 'Office', 'admin', true)
+  ('00000000-0000-0000-0000-000000000001', '+918208315074', 'Pramod Shelke', 'Office', 'admin', true)
 ON CONFLICT (phone_number) DO UPDATE 
-SET name = EXCLUDED.name, role = EXCLUDED.role;
+SET name = EXCLUDED.name, role = EXCLUDED.role, is_active = true;
+
+-- 2. Resident Profile (Arya Kukkadwal)
+INSERT INTO public.profiles (id, phone_number, name, room_number, role, is_active)
+VALUES 
+  ('00000000-0000-0000-0000-000000000002', '+919370291205', 'Arya Kukkadwal', '102-A', 'resident', true)
+ON CONFLICT (phone_number) DO UPDATE 
+SET name = EXCLUDED.name, room_number = EXCLUDED.room_number, role = EXCLUDED.role, is_active = true;
 
