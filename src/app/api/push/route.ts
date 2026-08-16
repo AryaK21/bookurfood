@@ -30,7 +30,8 @@ const MEAL_PRESETS: Record<MealType, { title: string; body: string }> = {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { subscription, mealType, payload, profileId, menuId, phone, broadcast } = body as {
+    const { action, subscription, mealType, payload, profileId, menuId, phone, broadcast } = body as {
+      action?: string;
       subscription?: any;
       mealType?: MealType;
       payload?: any;
@@ -39,6 +40,39 @@ export async function POST(request: Request) {
       phone?: string;
       broadcast?: boolean;
     };
+
+    // 1. Action: Save new Web Push Subscription
+    if (action === 'subscribe') {
+      if (!subscription || !subscription.endpoint) {
+        return NextResponse.json(
+          { success: false, error: 'Invalid push subscription payload' },
+          { status: 400 }
+        );
+      }
+
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      if (supabaseUrl && !supabaseUrl.includes('sample-pg-canteen')) {
+        try {
+          const supabase = await createClient();
+          await (supabase.from('push_subscriptions') as any).upsert(
+            {
+              endpoint: subscription.endpoint,
+              p256dh: subscription.keys?.p256dh || '',
+              auth: subscription.keys?.auth || '',
+              profile_id: profileId || null,
+            },
+            { onConflict: 'endpoint' }
+          );
+        } catch (dbErr: any) {
+          console.error('Failed to store push subscription:', dbErr);
+        }
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: 'Push subscription stored successfully',
+      });
+    }
 
     const targetMeal: MealType = mealType || 'lunch';
     const preset = MEAL_PRESETS[targetMeal] || MEAL_PRESETS.lunch;
@@ -54,7 +88,7 @@ export async function POST(request: Request) {
       phone: phone,
     });
 
-    // 1. Broadcast mode: Dispatch to all registered push subscriptions
+    // 2. Broadcast mode: Dispatch to all registered push subscriptions
     if (broadcast) {
       let sentCount = 0;
       const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -96,11 +130,11 @@ export async function POST(request: Request) {
         broadcast: true,
         sentCount,
         mealType: targetMeal,
-        message: `Notification broadcast sent for ${targetMeal.toUpperCase()}`,
+        message: `Notification broadcast sent to ${sentCount} devices for ${targetMeal.toUpperCase()}`,
       });
     }
 
-    // 2. Direct single subscription push
+    // 3. Direct single subscription push
     if (subscription) {
       await webPush.sendNotification(subscription, notificationPayload);
     }

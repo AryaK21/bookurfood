@@ -6,6 +6,7 @@ import { Navbar } from '@/components/ui/Navbar';
 import { ResidentMealView } from '@/components/resident/ResidentMealView';
 import { LoginForm } from '@/components/auth/LoginForm';
 import { InstallAppPrompt } from '@/components/pwa/InstallAppPrompt';
+import { NotificationPermissionBanner } from '@/components/pwa/NotificationPermissionBanner';
 import { Utensils } from 'lucide-react';
 import Link from 'next/link';
 
@@ -34,6 +35,9 @@ export default function HomePage() {
       <main className="flex-1 px-3.5 sm:px-6 py-3 sm:py-5 max-w-2xl mx-auto w-full space-y-3.5 sm:space-y-4 flex flex-col justify-center">
         {/* PWA 1-Tap Browser Install Prompt */}
         <InstallAppPrompt />
+
+        {/* 1-Tap Web Push Notification Permission Prompt */}
+        {isAuthenticated && <NotificationPermissionBanner />}
 
         {isAuthenticated && user ? (
           isAdmin ? (

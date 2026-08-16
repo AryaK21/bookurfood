@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { Navbar } from '@/components/ui/Navbar';
 import { TactileCard } from '@/components/ui/TactileCard';
 import { TactileButton } from '@/components/ui/TactileButton';
+import { registerPushNotifications } from '@/lib/push/push-client';
 import {
   Smartphone,
   Download,
@@ -16,6 +17,8 @@ import {
   Sparkles,
   Share2,
   Copy,
+  Bell,
+  BellRing,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -27,6 +30,11 @@ export default function InstallPage() {
   const [isInstallable, setIsInstallable] = useState(false);
   const [isInstalled, setIsInstalled] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  // Notification state
+  const [notifPermission, setNotifPermission] = useState<NotificationPermission>('default');
+  const [notifLoading, setNotifLoading] = useState(false);
+  const [notifSuccess, setNotifSuccess] = useState('');
 
   useEffect(() => {
     // Detect OS
@@ -46,6 +54,10 @@ export default function InstallPage() {
 
     if (isStandalone) {
       setIsInstalled(true);
+    }
+
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      setNotifPermission(Notification.permission);
     }
 
     // Listen for beforeinstallprompt
@@ -68,6 +80,17 @@ export default function InstallPage() {
       setIsInstallable(false);
     }
     setDeferredPrompt(null);
+  };
+
+  const handleEnableNotifications = async () => {
+    setNotifLoading(true);
+    setNotifSuccess('');
+    const res = await registerPushNotifications();
+    setNotifLoading(false);
+    setNotifPermission(res.permission);
+    if (res.success) {
+      setNotifSuccess('✓ Notification alerts active! You will now receive Food Ready alerts.');
+    }
   };
 
   const copyGuideLink = () => {
@@ -125,6 +148,48 @@ export default function InstallPage() {
             </p>
           </div>
         )}
+
+        {/* NOTIFICATION ENABLE CARD */}
+        <TactileCard variant="elevated" className="p-4 sm:p-5 space-y-3 bg-[#181818]">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center border border-amber-500/30 flex-shrink-0">
+                <BellRing className="w-4 h-4" />
+              </div>
+              <div>
+                <p className="text-xs font-black text-white">Food Ready Push Notifications</p>
+                <p className="text-[11px] text-zinc-400">
+                  {notifPermission === 'granted'
+                    ? '✓ Alerts are active on this device'
+                    : 'Get notified when food is served'}
+                </p>
+              </div>
+            </div>
+
+            {notifPermission === 'granted' ? (
+              <span className="px-3 py-1.5 rounded-xl bg-green-950/80 border border-green-700 text-green-300 font-bold text-xs flex items-center gap-1">
+                <CheckCircle2 className="w-3.5 h-3.5 text-green-400" />
+                <span>Active</span>
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={handleEnableNotifications}
+                disabled={notifLoading}
+                className="py-2 px-3.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-black text-xs cursor-pointer shadow-md transition-all active:scale-95"
+              >
+                {notifLoading ? 'Enabling...' : 'Enable Alerts'}
+              </button>
+            )}
+          </div>
+
+          {notifSuccess && (
+            <div className="p-2.5 rounded-xl bg-green-950/50 border border-green-800 text-[11px] text-green-300 font-bold flex items-center gap-1.5">
+              <CheckCircle2 className="w-4 h-4 text-green-400 flex-shrink-0" />
+              <span>{notifSuccess}</span>
+            </div>
+          )}
+        </TactileCard>
 
         {/* OS SELECTOR TABS */}
         <div className="grid grid-cols-3 gap-2 p-1.5 rounded-2xl bg-[#181818] border border-zinc-800">
@@ -276,7 +341,7 @@ export default function InstallPage() {
                   <div>
                     <p className="text-xs font-bold text-white">Tap &quot;Add&quot; at Top Right</p>
                     <p className="text-[11px] text-zinc-400">
-                      The FoodBook icon will appear on your iPhone home screen!
+                      The FoodBook icon will appear on your iPhone home screen! Open it and tap <strong>Enable Alerts</strong>.
                     </p>
                   </div>
                 </div>
